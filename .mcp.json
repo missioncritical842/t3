@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "nautobot": {
+      "type": "stdio",
+      "command": "/home/jea7587/t3/.venv/bin/python",
+      "args": ["/home/jea7587/t3/nautobot_server.py"]
+    }
+  }
+}

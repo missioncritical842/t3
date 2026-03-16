@@ -1,0 +1,13 @@
+[project]
+name = "netbrain-mcp-server"
+version = "0.1.0"
+description = "MCP server for NetBrain network management"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.2.0",
+    "httpx",
+    "python-dotenv",
+]
+
+[project.scripts]
+netbrain-mcp = "server:main"
