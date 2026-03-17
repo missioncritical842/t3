@@ -95,6 +95,9 @@ class NetBrainFieldDiscovery(Job):
         headers = {"Token": token, "Content-Type": "application/json"}
 
         try:
+            # --- Discover available tenants/domains ---
+            self._discover_tenants(host, headers)
+
             # --- Set tenant domain if provided ---
             if tenant_domain:
                 self._set_tenant_domain(host, headers, tenant_domain)
@@ -157,6 +160,46 @@ class NetBrainFieldDiscovery(Job):
         except Exception as exc:
             self.logger.warning("Set domain failed: %s", exc)
 
+    def _discover_tenants(self, host, headers):
+        """List available tenants and their domains."""
+        url = f"{host}{NETBRAIN_API_BASE}/CMDB/Tenants"
+        self.logger.info("Fetching tenants from %s ...", url)
+        try:
+            resp = requests.get(url, headers=headers, verify=False, timeout=15)
+            self.logger.info("Tenants HTTP %s", resp.status_code)
+            if resp.status_code == 200:
+                data = resp.json()
+                tenants = data.get("tenants", data.get("data", []))
+                self.logger.info("Tenants response: %s", json.dumps(data, indent=2)[:2000])
+                # For each tenant, try to get domains
+                for t in tenants[:3]:
+                    tid = t.get("tenantId", t.get("id", ""))
+                    tname = t.get("tenantName", t.get("name", ""))
+                    self.logger.info("  Tenant: %s (id: %s)", tname, tid)
+                    self._discover_domains(host, headers, tid)
+            else:
+                self.logger.info("Tenants response: %s", resp.text[:500])
+        except Exception as exc:
+            self.logger.warning("Tenants fetch failed: %s", exc)
+
+    def _discover_domains(self, host, headers, tenant_id):
+        """List domains for a tenant."""
+        url = f"{host}{NETBRAIN_API_BASE}/CMDB/Domains"
+        try:
+            resp = requests.get(url, headers=headers, verify=False, timeout=15,
+                                params={"tenantId": tenant_id})
+            if resp.status_code == 200:
+                data = resp.json()
+                domains = data.get("domains", data.get("data", []))
+                for d in domains[:5]:
+                    dname = d.get("domainName", d.get("name", ""))
+                    did = d.get("domainId", d.get("id", ""))
+                    self.logger.info("    Domain: %s (id: %s)", dname, did)
+            else:
+                self.logger.info("    Domains HTTP %s: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            self.logger.info("    Domains fetch failed: %s", exc)
+
     def _logout(self, host, headers):
         try:
             requests.delete(f"{host}{NETBRAIN_API_BASE}/Session",
@@ -180,7 +223,7 @@ class NetBrainFieldDiscovery(Job):
 
         try:
             resp = requests.get(url, headers=headers, verify=False, timeout=30,
-                                params={"skip": 0, "limit": sample_count})
+                                params={"skip": 0, "limit": 10})
         except Exception as exc:
             self.logger.error("Device fetch failed: %s", exc)
             return
@@ -335,11 +378,14 @@ class NetBrainFieldDiscovery(Job):
         self.logger.info("SITE TREE DISCOVERY")
         self.logger.info("=" * 60)
 
-        url = f"{host}{NETBRAIN_API_BASE}/CMDB/Sites"
-        self.logger.info("Fetching site tree from %s ...", url)
+        # R12.1 uses POST /CMDB/Sites/ChildSites with sitePath for tree traversal
+        # First try root level
+        url = f"{host}{NETBRAIN_API_BASE}/CMDB/Sites/ChildSites"
+        self.logger.info("Fetching root sites from %s (POST) ...", url)
 
         try:
-            resp = requests.get(url, headers=headers, verify=False, timeout=30)
+            resp = requests.post(url, json={"sitePath": "My Network"},
+                                 headers=headers, verify=False, timeout=30)
         except Exception as exc:
             self.logger.error("Site fetch failed: %s", exc)
             return
@@ -348,25 +394,35 @@ class NetBrainFieldDiscovery(Job):
 
         if resp.status_code != 200:
             self.logger.warning("Sites response: %s", resp.text[:500])
+            # Try GET as fallback
+            try:
+                resp = requests.get(f"{host}{NETBRAIN_API_BASE}/CMDB/Sites",
+                                    headers=headers, verify=False, timeout=15)
+                self.logger.info("GET /Sites HTTP %s: %s", resp.status_code, resp.text[:500])
+            except Exception as exc:
+                self.logger.warning("GET fallback failed: %s", exc)
             return
 
         data = resp.json()
-        sites = data.get("sites", data.get("data", []))
+        sites = data.get("sites", data.get("data", data.get("childSites", [])))
 
         if not sites:
             self.logger.info("Response keys: %s", list(data.keys()))
             self.logger.info("Response (truncated): %s", json.dumps(data, indent=2)[:2000])
             return
 
-        self.logger.info("Got %d site(s) -- showing first 5", len(sites))
-        for i, site in enumerate(sites[:5]):
+        self.logger.info("Got %d site(s) -- showing first 10", len(sites))
+        for i, site in enumerate(sites[:10]):
             self.logger.info("  --- Site %d ---", i + 1)
-            self.logger.info("  Keys: %s", sorted(site.keys()))
-            for key in sorted(site.keys()):
-                val = site[key]
-                val_type = type(val).__name__
-                val_preview = str(val)[:200]
-                self.logger.info("    %s (%s): %s", key, val_type, val_preview)
+            if isinstance(site, dict):
+                self.logger.info("  Keys: %s", sorted(site.keys()))
+                for key in sorted(site.keys()):
+                    val = site[key]
+                    val_type = type(val).__name__
+                    val_preview = str(val)[:200]
+                    self.logger.info("    %s (%s): %s", key, val_type, val_preview)
+            else:
+                self.logger.info("  Value: %s", str(site)[:300])
 
 
 register_jobs(NetBrainFieldDiscovery)
