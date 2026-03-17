@@ -288,8 +288,11 @@ class NetBrainFieldDiscovery(Job):
         self.logger.info("Fetching devices from %s (limit=100) ...", url)
 
         all_devices = []
+        non_aws_found = 0
         skip = 0
-        while len(all_devices) < 200:
+        max_pages = 70  # up to 7000 devices
+        pages = 0
+        while pages < max_pages:
             try:
                 resp = requests.get(url, headers=headers, verify=False, timeout=30,
                                     params={"skip": skip, "limit": 100})
@@ -306,12 +309,23 @@ class NetBrainFieldDiscovery(Job):
             batch = data.get("devices", data.get("data", []))
             if not batch:
                 break
-            all_devices.extend(batch)
+            for d in batch:
+                all_devices.append(d)
+                if "AWS" not in (d.get("subTypeName") or ""):
+                    non_aws_found += 1
             skip += len(batch)
+            pages += 1
             if len(batch) < 100:
                 break
+            # Stop early once we find enough non-AWS devices
+            if non_aws_found >= sample_count * 2:
+                self.logger.info("Found %d non-AWS at skip=%d, stopping", non_aws_found, skip)
+                break
+            # Log progress every 10 pages
+            if pages % 10 == 0:
+                self.logger.info("  Scanned %d devices so far (%d non-AWS)...", len(all_devices), non_aws_found)
 
-        self.logger.info("Total devices fetched: %d", len(all_devices))
+        self.logger.info("Total devices scanned: %d (non-AWS: %d, pages: %d)", len(all_devices), non_aws_found, pages)
         devices = all_devices
 
         # Log all unique subTypeNames to see device diversity
