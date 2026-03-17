@@ -5,7 +5,7 @@ Logs status and headers only — no data written to Nautobot.
 """
 
 import requests
-from nautobot.apps.jobs import Job, StringVar
+from nautobot.apps.jobs import Job, StringVar, register_jobs
 
 NETBRAIN_API_BASE = "/ServicesAPI/API/V1"
 
@@ -123,3 +123,6 @@ class NetBrainConnectivityTest(Job):
             self.logger.warning("Logout failed: %s", exc)
 
         self.logger.info("NetBrain connectivity test PASSED.")
+
+
+register_jobs(NetBrainConnectivityTest)
