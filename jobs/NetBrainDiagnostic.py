@@ -73,8 +73,8 @@ class NetBrainDiagnostic(Job):
             self.logger.info("TEST 2: Total device count")
             self.logger.info("=" * 60)
 
-            # Check if there are devices beyond 7000
-            for skip_val in [6900, 7000, 7100, 7500, 8000]:
+            # Scan across the full inventory range
+            for skip_val in [8000, 9000, 10000, 12000, 15000, 20000, 25000, 30000, 40000, 50000]:
                 r = requests.get(f"{host}{V1}/CMDB/Devices",
                                  params={"skip": skip_val, "limit": 10},
                                  headers=h, verify=False, timeout=15)
