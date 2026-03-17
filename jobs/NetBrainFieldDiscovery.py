@@ -63,8 +63,8 @@ class NetBrainFieldDiscovery(Job):
     )
     sample_count = IntegerVar(
         label="Sample Device Count",
-        description="How many devices to fetch (max 5 to keep logs readable)",
-        default=2,
+        description="How many diverse device types to sample (max 10)",
+        default=5,
         required=False,
     )
     fetch_interfaces = BooleanVar(
@@ -151,14 +151,34 @@ class NetBrainFieldDiscovery(Job):
 
     def _set_tenant_domain(self, host, headers, domain):
         url = f"{host}{NETBRAIN_API_BASE}/Session/CurrentDomain"
-        self.logger.info("Setting tenant domain to: %s", domain)
+        tenant = domain.split("/")[0]
+        dom = domain.split("/")[-1]
+        self.logger.info("Setting tenant domain to: %s / %s", tenant, dom)
+
+        # Try multiple payload formats -- R12.1 may differ from docs
+        payloads = [
+            {"tenantName": tenant, "domainName": dom},
+            {"tenant_name": tenant, "domain_name": dom},
+            {"TenantName": tenant, "DomainName": dom},
+        ]
+        for payload in payloads:
+            try:
+                resp = requests.put(url, json=payload,
+                                    headers=headers, verify=False, timeout=15)
+                self.logger.info("Set domain HTTP %s (payload keys: %s): %s",
+                                 resp.status_code, list(payload.keys()),
+                                 resp.text[:300])
+                if resp.status_code == 200:
+                    return
+            except Exception as exc:
+                self.logger.warning("Set domain failed: %s", exc)
+
+        # Also try GET to see current domain
         try:
-            resp = requests.put(url, json={"tenantName": domain.split("/")[0],
-                                           "domainName": domain.split("/")[-1]},
-                                headers=headers, verify=False, timeout=15)
-            self.logger.info("Set domain HTTP %s", resp.status_code)
+            resp = requests.get(url, headers=headers, verify=False, timeout=15)
+            self.logger.info("GET CurrentDomain HTTP %s: %s", resp.status_code, resp.text[:300])
         except Exception as exc:
-            self.logger.warning("Set domain failed: %s", exc)
+            self.logger.info("GET CurrentDomain failed: %s", exc)
 
     def _discover_tenants(self, host, headers, existing_domain=""):
         """List available tenants and their domains. Returns tenant/domain string if auto-detected."""
@@ -233,27 +253,76 @@ class NetBrainFieldDiscovery(Job):
         self.logger.info("DEVICE FIELD DISCOVERY")
         self.logger.info("=" * 60)
 
-        # Try GET /CMDB/Devices with a small limit
+        # Fetch a larger batch to find diverse device types
         url = f"{host}{NETBRAIN_API_BASE}/CMDB/Devices"
-        self.logger.info("Fetching devices from %s ...", url)
+        self.logger.info("Fetching devices from %s (limit=100) ...", url)
 
-        try:
-            resp = requests.get(url, headers=headers, verify=False, timeout=30,
-                                params={"skip": 0, "limit": 10})
-        except Exception as exc:
-            self.logger.error("Device fetch failed: %s", exc)
-            return
+        all_devices = []
+        skip = 0
+        while len(all_devices) < 200:
+            try:
+                resp = requests.get(url, headers=headers, verify=False, timeout=30,
+                                    params={"skip": skip, "limit": 100})
+            except Exception as exc:
+                self.logger.error("Device fetch failed: %s", exc)
+                break
 
-        self.logger.info("Devices HTTP %s", resp.status_code)
+            if resp.status_code != 200:
+                self.logger.warning("Device list HTTP %s at skip=%d: %s",
+                                    resp.status_code, skip, resp.text[:300])
+                break
 
-        if resp.status_code != 200:
-            self.logger.warning("Device list response: %s", resp.text[:500])
-            # Try alternate endpoint
-            self._try_alternate_device_endpoints(host, headers, sample_count, fetch_interfaces)
-            return
+            data = resp.json()
+            batch = data.get("devices", data.get("data", []))
+            if not batch:
+                break
+            all_devices.extend(batch)
+            skip += len(batch)
+            if len(batch) < 100:
+                break
 
-        data = resp.json()
-        devices = data.get("devices", data.get("data", []))
+        self.logger.info("Total devices fetched: %d", len(all_devices))
+        devices = all_devices
+
+        # Log all unique subTypeNames to see device diversity
+        sub_types = {}
+        for d in devices:
+            st = d.get("subTypeName", "unknown")
+            sub_types[st] = sub_types.get(st, 0) + 1
+        self.logger.info("Device type distribution:")
+        for st, count in sorted(sub_types.items(), key=lambda x: -x[1]):
+            self.logger.info("  %s: %d", st, count)
+
+        # Pick sample devices: prefer non-AWS, diverse types
+        seen_types = set()
+        selected = []
+        # First pass: one of each non-AWS type
+        for d in devices:
+            st = d.get("subTypeName", "")
+            if "AWS" not in st and st not in seen_types:
+                selected.append(d)
+                seen_types.add(st)
+                if len(selected) >= sample_count:
+                    break
+        # Second pass: if not enough non-AWS, add AWS types not yet seen
+        if len(selected) < sample_count:
+            for d in devices:
+                st = d.get("subTypeName", "")
+                if st not in seen_types:
+                    selected.append(d)
+                    seen_types.add(st)
+                    if len(selected) >= sample_count:
+                        break
+        # Third pass: fill remaining from any
+        if len(selected) < sample_count:
+            for d in devices:
+                if d not in selected:
+                    selected.append(d)
+                    if len(selected) >= sample_count:
+                        break
+
+        devices = selected
+        self.logger.info("Selected %d diverse sample devices", len(devices))
 
         if not devices:
             self.logger.warning("No devices returned. Response keys: %s", list(data.keys()))
@@ -412,13 +481,18 @@ class NetBrainFieldDiscovery(Job):
 
         data = resp.json()
         attrs = data.get("attributes", data)
+        # Unwrap {intf_name: {actual_attrs}} wrapper
+        if isinstance(attrs, dict) and len(attrs) == 1:
+            key0 = list(attrs.keys())[0]
+            if isinstance(attrs[key0], dict):
+                attrs = attrs[key0]
         self.logger.info("  INTERFACE ATTRIBUTES for '%s':", intf_name)
         if isinstance(attrs, dict):
-            self.logger.info("    Keys: %s", sorted(attrs.keys()))
+            self.logger.info("    Keys (%d): %s", len(attrs), sorted(attrs.keys()))
             for key in sorted(attrs.keys()):
                 val = attrs[key]
                 val_type = type(val).__name__
-                val_preview = str(val)[:200]
+                val_preview = str(val)[:300]
                 self.logger.info("    %s (%s): %s", key, val_type, val_preview)
         else:
             self.logger.info("    Value: %s", str(attrs)[:500])
