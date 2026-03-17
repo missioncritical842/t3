@@ -289,8 +289,8 @@ class NetBrainFieldDiscovery(Job):
 
         all_devices = []
         non_aws_found = 0
-        skip = 0
-        max_pages = 70  # up to 7000 devices
+        skip = 7000  # skip past AWS devices (first ~7000 are all AWS)
+        max_pages = 30  # scan 3000 more beyond the AWS block
         pages = 0
         while pages < max_pages:
             try:
@@ -550,14 +550,13 @@ class NetBrainFieldDiscovery(Job):
         self.logger.info("SITE TREE DISCOVERY")
         self.logger.info("=" * 60)
 
-        # R12.1 uses POST /CMDB/Sites/ChildSites with sitePath for tree traversal
-        # First try root level
+        # R12.1 uses GET /CMDB/Sites/ChildSites?sitePath=...
         url = f"{host}{NETBRAIN_API_BASE}/CMDB/Sites/ChildSites"
-        self.logger.info("Fetching root sites from %s (POST) ...", url)
+        self.logger.info("Fetching root sites from %s (GET) ...", url)
 
         try:
-            resp = requests.post(url, json={"sitePath": "My Network"},
-                                 headers=headers, verify=False, timeout=30)
+            resp = requests.get(url, params={"sitePath": "My Network"},
+                                headers=headers, verify=False, timeout=30)
         except Exception as exc:
             self.logger.error("Site fetch failed: %s", exc)
             return
@@ -566,13 +565,6 @@ class NetBrainFieldDiscovery(Job):
 
         if resp.status_code != 200:
             self.logger.warning("Sites response: %s", resp.text[:500])
-            # Try GET as fallback
-            try:
-                resp = requests.get(f"{host}{NETBRAIN_API_BASE}/CMDB/Sites",
-                                    headers=headers, verify=False, timeout=15)
-                self.logger.info("GET /Sites HTTP %s: %s", resp.status_code, resp.text[:500])
-            except Exception as exc:
-                self.logger.warning("GET fallback failed: %s", exc)
             return
 
         data = resp.json()
