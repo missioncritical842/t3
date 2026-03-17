@@ -31,11 +31,11 @@ class NetBrainConnectivityTest(Job):
     host = StringVar(
         label="NetBrain Host",
         description="Base URL or IP (e.g. https://10.134.98.133)",
-        default="https://10.134.98.133",
+        default="https://10.134.98.133",  # DNS (netbrain.crbgf.net) may not resolve from Nautobot cloud
     )
     username = StringVar(
         label="Username",
-        default="admin",
+        default="nautobotapi",
     )
     password = StringVar(
         label="Password",
