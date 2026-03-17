@@ -155,30 +155,60 @@ class NetBrainFieldDiscovery(Job):
         dom = domain.split("/")[-1]
         self.logger.info("Setting tenant domain to: %s / %s", tenant, dom)
 
-        # Try multiple payload formats -- R12.1 may differ from docs
+        # First resolve tenant/domain IDs
+        tenant_id, domain_id = self._resolve_tenant_domain_ids(host, headers, tenant, dom)
+
+        # R12.1 requires tenantId/domainId (UUIDs), not names
         payloads = [
+            {"tenantId": tenant_id, "domainId": domain_id},
             {"tenantName": tenant, "domainName": dom},
-            {"tenant_name": tenant, "domain_name": dom},
-            {"TenantName": tenant, "DomainName": dom},
         ]
+        if not tenant_id:
+            # If we couldn't resolve IDs, try names only
+            payloads = [{"tenantName": tenant, "domainName": dom}]
+
         for payload in payloads:
             try:
                 resp = requests.put(url, json=payload,
                                     headers=headers, verify=False, timeout=15)
-                self.logger.info("Set domain HTTP %s (payload keys: %s): %s",
-                                 resp.status_code, list(payload.keys()),
+                self.logger.info("Set domain HTTP %s (payload: %s): %s",
+                                 resp.status_code, payload,
                                  resp.text[:300])
                 if resp.status_code == 200:
                     return
             except Exception as exc:
                 self.logger.warning("Set domain failed: %s", exc)
 
-        # Also try GET to see current domain
+    def _resolve_tenant_domain_ids(self, host, headers, tenant_name, domain_name):
+        """Resolve tenant and domain names to their UUIDs."""
+        tenant_id = ""
+        domain_id = ""
         try:
-            resp = requests.get(url, headers=headers, verify=False, timeout=15)
-            self.logger.info("GET CurrentDomain HTTP %s: %s", resp.status_code, resp.text[:300])
-        except Exception as exc:
-            self.logger.info("GET CurrentDomain failed: %s", exc)
+            resp = requests.get(f"{host}{NETBRAIN_API_BASE}/CMDB/Tenants",
+                                headers=headers, verify=False, timeout=15)
+            if resp.status_code == 200:
+                for t in resp.json().get("tenants", []):
+                    if t.get("tenantName") == tenant_name:
+                        tenant_id = t.get("tenantId", "")
+                        break
+        except Exception:
+            pass
+
+        if tenant_id:
+            try:
+                resp = requests.get(f"{host}{NETBRAIN_API_BASE}/CMDB/Domains",
+                                    headers=headers, verify=False, timeout=15,
+                                    params={"tenantId": tenant_id})
+                if resp.status_code == 200:
+                    for d in resp.json().get("domains", []):
+                        if d.get("domainName") == domain_name:
+                            domain_id = d.get("domainId", "")
+                            break
+            except Exception:
+                pass
+
+        self.logger.info("Resolved IDs: tenant=%s domain=%s", tenant_id, domain_id)
+        return tenant_id, domain_id
 
     def _discover_tenants(self, host, headers, existing_domain=""):
         """List available tenants and their domains. Returns tenant/domain string if auto-detected."""
