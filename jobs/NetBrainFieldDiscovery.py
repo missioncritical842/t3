@@ -96,7 +96,7 @@ class NetBrainFieldDiscovery(Job):
 
         try:
             # --- Discover available tenants/domains ---
-            self._discover_tenants(host, headers)
+            tenant_domain = self._discover_tenants(host, headers, tenant_domain)
 
             # --- Set tenant domain if provided ---
             if tenant_domain:
@@ -160,10 +160,12 @@ class NetBrainFieldDiscovery(Job):
         except Exception as exc:
             self.logger.warning("Set domain failed: %s", exc)
 
-    def _discover_tenants(self, host, headers):
-        """List available tenants and their domains."""
+    def _discover_tenants(self, host, headers, existing_domain=""):
+        """List available tenants and their domains. Returns tenant/domain string if auto-detected."""
         url = f"{host}{NETBRAIN_API_BASE}/CMDB/Tenants"
         self.logger.info("Fetching tenants from %s ...", url)
+        first_tenant = ""
+        first_domain = ""
         try:
             resp = requests.get(url, headers=headers, verify=False, timeout=15)
             self.logger.info("Tenants HTTP %s", resp.status_code)
@@ -171,20 +173,31 @@ class NetBrainFieldDiscovery(Job):
                 data = resp.json()
                 tenants = data.get("tenants", data.get("data", []))
                 self.logger.info("Tenants response: %s", json.dumps(data, indent=2)[:2000])
-                # For each tenant, try to get domains
                 for t in tenants[:3]:
                     tid = t.get("tenantId", t.get("id", ""))
                     tname = t.get("tenantName", t.get("name", ""))
                     self.logger.info("  Tenant: %s (id: %s)", tname, tid)
-                    self._discover_domains(host, headers, tid)
+                    dname = self._discover_domains(host, headers, tid)
+                    if not first_tenant and tname:
+                        first_tenant = tname
+                    if not first_domain and dname:
+                        first_domain = dname
             else:
                 self.logger.info("Tenants response: %s", resp.text[:500])
         except Exception as exc:
             self.logger.warning("Tenants fetch failed: %s", exc)
 
+        # Auto-detect tenant/domain if not provided
+        if not existing_domain and first_tenant and first_domain:
+            auto = f"{first_tenant}/{first_domain}"
+            self.logger.info("Auto-detected tenant/domain: %s", auto)
+            return auto
+        return existing_domain
+
     def _discover_domains(self, host, headers, tenant_id):
-        """List domains for a tenant."""
+        """List domains for a tenant. Returns first domain name found."""
         url = f"{host}{NETBRAIN_API_BASE}/CMDB/Domains"
+        first_dname = ""
         try:
             resp = requests.get(url, headers=headers, verify=False, timeout=15,
                                 params={"tenantId": tenant_id})
@@ -195,10 +208,13 @@ class NetBrainFieldDiscovery(Job):
                     dname = d.get("domainName", d.get("name", ""))
                     did = d.get("domainId", d.get("id", ""))
                     self.logger.info("    Domain: %s (id: %s)", dname, did)
+                    if not first_dname and dname:
+                        first_dname = dname
             else:
                 self.logger.info("    Domains HTTP %s: %s", resp.status_code, resp.text[:200])
         except Exception as exc:
             self.logger.info("    Domains fetch failed: %s", exc)
+        return first_dname
 
     def _logout(self, host, headers):
         try:
@@ -362,12 +378,50 @@ class NetBrainFieldDiscovery(Job):
 
         for i, intf in enumerate(interfaces[:3]):
             self.logger.info("  --- Interface %d ---", i + 1)
-            self.logger.info("  Keys: %s", sorted(intf.keys()))
-            for key in sorted(intf.keys()):
-                val = intf[key]
+            if isinstance(intf, dict):
+                self.logger.info("  Keys: %s", sorted(intf.keys()))
+                for key in sorted(intf.keys()):
+                    val = intf[key]
+                    val_type = type(val).__name__
+                    val_preview = str(val)[:200]
+                    self.logger.info("    %s (%s): %s", key, val_type, val_preview)
+            else:
+                # Interface might be a string (just the name) -- fetch attributes
+                self.logger.info("  Interface value (type %s): %s", type(intf).__name__, str(intf)[:300])
+
+        # If interfaces are strings (names), fetch attributes for the first one
+        if interfaces and isinstance(interfaces[0], str):
+            self.logger.info("Interfaces are names -- fetching attributes for first 3...")
+            for intf_name in interfaces[:3]:
+                self._fetch_interface_attributes(host, headers, hostname, intf_name)
+
+    def _fetch_interface_attributes(self, host, headers, hostname, intf_name):
+        """Fetch detailed attributes for a single interface."""
+        url = f"{host}{NETBRAIN_API_BASE}/CMDB/Interfaces/Attributes"
+        self.logger.info("  Fetching attributes for interface '%s' on '%s' ...", intf_name, hostname)
+        try:
+            resp = requests.get(url, headers=headers, verify=False, timeout=15,
+                                params={"hostname": hostname, "interfaceName": intf_name})
+        except Exception as exc:
+            self.logger.warning("  Interface attributes fetch failed: %s", exc)
+            return
+
+        if resp.status_code != 200:
+            self.logger.warning("  Interface attrs HTTP %s: %s", resp.status_code, resp.text[:300])
+            return
+
+        data = resp.json()
+        attrs = data.get("attributes", data)
+        self.logger.info("  INTERFACE ATTRIBUTES for '%s':", intf_name)
+        if isinstance(attrs, dict):
+            self.logger.info("    Keys: %s", sorted(attrs.keys()))
+            for key in sorted(attrs.keys()):
+                val = attrs[key]
                 val_type = type(val).__name__
                 val_preview = str(val)[:200]
                 self.logger.info("    %s (%s): %s", key, val_type, val_preview)
+        else:
+            self.logger.info("    Value: %s", str(attrs)[:500])
 
     # ------------------------------------------------------------------
     # Site discovery
