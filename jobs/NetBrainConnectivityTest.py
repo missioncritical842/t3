@@ -1,11 +1,17 @@
 """NetBrain API Connectivity Test job for Nautobot.
 
 Tests authentication and basic API reachability to NetBrain.
-Logs status and headers only — no data written to Nautobot.
+Logs status and headers only -- no data written to Nautobot.
 """
 
+from __future__ import annotations
+
 import requests
+import urllib3
+
 from nautobot.apps.jobs import Job, StringVar, register_jobs
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 NETBRAIN_API_BASE = "/ServicesAPI/API/V1"
 
@@ -17,8 +23,9 @@ class NetBrainConnectivityTest(Job):
         name = "NetBrain: Connectivity Test"
         description = (
             "Test authentication and API reachability for NetBrain. "
-            "Logs HTTP status and response headers only — no data written."
+            "Logs HTTP status and response headers only -- no data written."
         )
+        commit_default = False
         has_sensitive_variables = True
 
     host = StringVar(
@@ -34,17 +41,20 @@ class NetBrainConnectivityTest(Job):
         label="Password",
         description="NetBrain password",
         default="",
+        required=False,
     )
     client_id = StringVar(
         label="Authentication ID (Client ID)",
         default="",
+        required=False,
     )
     client_secret = StringVar(
         label="Client Secret",
         default="",
+        required=False,
     )
 
-    def run(self, *, host, username, password, client_id, client_secret):
+    def run(self, host="", username="", password="", client_id="", client_secret="", **kwargs):
         host = host.rstrip("/")
         login_url = f"{host}{NETBRAIN_API_BASE}/Session"
 
@@ -68,7 +78,7 @@ class NetBrainConnectivityTest(Job):
                 timeout=15,
             )
         except requests.exceptions.ConnectTimeout:
-            self.logger.error("Connection TIMED OUT — host not reachable.")
+            self.logger.error("Connection TIMED OUT -- host not reachable.")
             return
         except requests.exceptions.ConnectionError as exc:
             self.logger.error("Connection FAILED: %s", exc)
@@ -87,7 +97,7 @@ class NetBrainConnectivityTest(Job):
             self.logger.error("No token in response. Body: %s", data)
             return
 
-        self.logger.info("Login SUCCESS — token starts with: %s...", token[:12])
+        self.logger.info("Login SUCCESS -- token starts with: %s...", token[:12])
 
         # --- Step 2: Product Version (lightweight read) ---
         version_url = f"{host}{NETBRAIN_API_BASE}/System/ProductVersion"
@@ -123,6 +133,7 @@ class NetBrainConnectivityTest(Job):
             self.logger.warning("Logout failed: %s", exc)
 
         self.logger.info("NetBrain connectivity test PASSED.")
+        return "SUCCESS"
 
 
 register_jobs(NetBrainConnectivityTest)
