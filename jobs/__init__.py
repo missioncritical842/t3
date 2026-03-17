@@ -1,0 +1,5 @@
+from nautobot.apps.jobs import register_jobs
+
+from .NetBrainConnectivityTest import NetBrainConnectivityTest
+
+register_jobs(NetBrainConnectivityTest)
