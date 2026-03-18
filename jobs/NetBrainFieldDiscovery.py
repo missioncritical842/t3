@@ -291,55 +291,82 @@ class NetBrainFieldDiscovery(Job):
         self.logger.info("DEVICE FIELD DISCOVERY")
         self.logger.info("=" * 60)
 
-        # Fetch a larger batch to find diverse device types
-        url = f"{host}{NETBRAIN_API_BASE}/CMDB/Devices"
-        self.logger.info("Fetching devices from %s (limit=100) ...", url)
-
+        # Use site-based queries to find real network devices directly
+        # Deep dive confirmed AM5 Data Center has 1,322 devices including Cisco/Arista/etc.
         all_devices = []
-        non_aws_found = 0
-        skip = 9500  # skip past AWS/EndSystem/Azure blocks to reach network devices
-        max_pages = 20  # scan ~2000 more where the real gear lives
-        pages = 0
-        while pages < max_pages:
+        target_sites = [
+            "My Network/DataCenter-AMER/AM5/AM5 - Data Center",
+            "My Network/DataCenter-AMER/AM6/AM6 - Data Center",
+            "My Network/DataCenter-EMEA/EM3-DataCenter",
+            "My Network/CRBGF Branch Offices",
+        ]
+        for site_path in target_sites:
+            self.logger.info("Querying devices at site: %s", site_path)
             try:
-                resp = requests.get(url, headers=headers, verify=False, timeout=60,
-                                    params={"skip": skip, "limit": 100})
+                resp = requests.get(
+                    f"{host}{NETBRAIN_API_BASE}/CMDB/Sites/Devices",
+                    params={"sitePath": site_path, "limit": 100},
+                    headers=headers, verify=False, timeout=60)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    site_devs = data.get("devices", data.get("data", []))
+                    self.logger.info("  Got %d devices from %s", len(site_devs), site_path)
+                    # Log types found
+                    site_types = {}
+                    for d in site_devs:
+                        st = d.get("subTypeName", d.get("deviceTypeName", "?"))
+                        site_types[st] = site_types.get(st, 0) + 1
+                    self.logger.info("  Types: %s", site_types)
+                    all_devices.extend(site_devs)
+                else:
+                    self.logger.info("  HTTP %s: %s", resp.status_code, resp.text[:300])
             except Exception as exc:
-                self.logger.error("Device fetch failed: %s", exc)
-                break
+                self.logger.warning("  Failed: %s", exc)
 
-            if resp.status_code != 200:
-                self.logger.warning("Device list HTTP %s at skip=%d: %s",
-                                    resp.status_code, skip, resp.text[:300])
-                break
+        # Also try paginated /CMDB/Devices but only if we didn't find enough network gear
+        NETWORK_TYPES = {
+            "Cisco IOS Switch", "Cisco Router", "Cisco Nexus Switch",
+            "Cisco ACI Spine Switch", "Arista Switch", "Palo Alto Firewall",
+            "F5 Load Balancer", "Aruba Switch", "SilverPeak WAN Optimizer",
+            "Cisco Meraki Firewall", "Cisco Meraki Switch", "Cisco WLC",
+            "Cisco Meraki AP", "Aruba IAP", "Cisco ISE", "LWAP",
+        }
+        network_devs = [d for d in all_devices
+                        if d.get("subTypeName", d.get("deviceTypeName", "")) in NETWORK_TYPES]
+        self.logger.info("Network devices from site queries: %d", len(network_devs))
 
-            data = resp.json()
-            batch = data.get("devices", data.get("data", []))
-            if not batch:
-                break
-            for d in batch:
-                all_devices.append(d)
-                if "AWS" not in (d.get("subTypeName") or ""):
-                    non_aws_found += 1
-            skip += len(batch)
-            pages += 1
-            if len(batch) < 100:
-                break
-            # Stop early once we find enough non-AWS devices
-            if non_aws_found >= sample_count * 2:
-                self.logger.info("Found %d non-AWS at skip=%d, stopping", non_aws_found, skip)
-                break
-            # Log progress every 10 pages
-            if pages % 10 == 0:
-                self.logger.info("  Scanned %d devices so far (%d non-AWS)...", len(all_devices), non_aws_found)
+        if len(network_devs) < sample_count:
+            self.logger.info("Supplementing with paginated scan...")
+            import time
+            url = f"{host}{NETBRAIN_API_BASE}/CMDB/Devices"
+            skip = 9500
+            for page in range(15):
+                try:
+                    time.sleep(1)  # rate limit protection
+                    resp = requests.get(url, headers=headers, verify=False, timeout=60,
+                                        params={"skip": skip, "limit": 100})
+                    if resp.status_code != 200 or not resp.json().get("devices"):
+                        break
+                    batch = resp.json()["devices"]
+                    for d in batch:
+                        st = d.get("subTypeName", "")
+                        if st in NETWORK_TYPES:
+                            all_devices.append(d)
+                            network_devs.append(d)
+                    skip += len(batch)
+                    if len(batch) < 100:
+                        break
+                except Exception:
+                    break
+            self.logger.info("After paginated scan: %d network devices total", len(network_devs))
 
-        self.logger.info("Total devices scanned: %d (non-AWS: %d, pages: %d)", len(all_devices), non_aws_found, pages)
+        self.logger.info("Total devices collected: %d (network: %d)", len(all_devices), len(network_devs))
         devices = all_devices
 
         # Log all unique subTypeNames to see device diversity
         sub_types = {}
         for d in devices:
-            st = d.get("subTypeName", "unknown")
+            st = d.get("subTypeName", d.get("deviceTypeName", "unknown"))
             sub_types[st] = sub_types.get(st, 0) + 1
         self.logger.info("Device type distribution:")
         for st, count in sorted(sub_types.items(), key=lambda x: -x[1]):
