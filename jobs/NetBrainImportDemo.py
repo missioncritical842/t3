@@ -119,8 +119,8 @@ class NetBrainImportDemo(Job):
     )
     device_limit = IntegerVar(
         label="Device Limit",
-        description="Max network devices to import (1-50).",
-        default=10, required=False,
+        description="Max network devices to import. Set to 0 for ALL (~550 devices without WAPs, ~940 with).",
+        default=0, required=False,
     )
     sync_interfaces = BooleanVar(
         label="Sync Interfaces",
@@ -143,7 +143,9 @@ class NetBrainImportDemo(Job):
         password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "") or stored.get("password", "")
         client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "") or stored.get("client_id", "")
         client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "") or stored.get("client_secret", "")
-        device_limit = max(1, min(int(device_limit or 10), 50))
+        device_limit = int(device_limit or 0)
+        if device_limit <= 0:
+            device_limit = 99999  # effectively unlimited
 
         # Build target set based on WAP toggle
         target_types = set(TARGET_SUBTYPES)
