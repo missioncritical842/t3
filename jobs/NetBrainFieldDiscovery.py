@@ -63,8 +63,8 @@ class NetBrainFieldDiscovery(Job):
     )
     sample_count = IntegerVar(
         label="Sample Device Count",
-        description="How many diverse device types to sample (max 10)",
-        default=5,
+        description="How many diverse device types to sample (max 12)",
+        default=8,
         required=False,
     )
     fetch_interfaces = BooleanVar(
@@ -289,8 +289,8 @@ class NetBrainFieldDiscovery(Job):
 
         all_devices = []
         non_aws_found = 0
-        skip = 7000  # skip past AWS devices (first ~7000 are all AWS)
-        max_pages = 30  # scan 3000 more beyond the AWS block
+        skip = 0
+        max_pages = 110  # scan full inventory (~11000 devices)
         pages = 0
         while pages < max_pages:
             try:
@@ -337,36 +337,38 @@ class NetBrainFieldDiscovery(Job):
         for st, count in sorted(sub_types.items(), key=lambda x: -x[1]):
             self.logger.info("  %s: %d", st, count)
 
-        # Pick sample devices: prefer non-AWS, diverse types
+        # Pick sample devices: prioritize real network gear
+        PRIORITY_TYPES = [
+            "Cisco IOS Switch", "Cisco Router", "Cisco Nexus Switch",
+            "Cisco ACI Spine Switch", "Arista Switch", "Palo Alto Firewall",
+            "F5 Load Balancer", "Aruba Switch", "SilverPeak WAN Optimizer",
+            "Cisco Meraki Firewall", "Cisco Meraki Switch", "Cisco WLC",
+        ]
         seen_types = set()
         selected = []
-        # First pass: one of each non-AWS type
-        for d in devices:
-            st = d.get("subTypeName", "")
-            if "AWS" not in st and st not in seen_types:
-                selected.append(d)
-                seen_types.add(st)
-                if len(selected) >= sample_count:
+        # First pass: one of each priority type
+        for target_type in PRIORITY_TYPES:
+            if len(selected) >= sample_count:
+                break
+            for d in devices:
+                if d.get("subTypeName") == target_type and target_type not in seen_types:
+                    selected.append(d)
+                    seen_types.add(target_type)
                     break
-        # Second pass: if not enough non-AWS, add AWS types not yet seen
+        # Second pass: fill with any other non-AWS/non-EndSystem types
         if len(selected) < sample_count:
             for d in devices:
                 st = d.get("subTypeName", "")
-                if st not in seen_types:
+                skip_types = {"AWS", "Azure", "End System", "IP Phone"}
+                if st not in seen_types and not any(s in st for s in skip_types):
                     selected.append(d)
                     seen_types.add(st)
                     if len(selected) >= sample_count:
                         break
-        # Third pass: fill remaining from any
-        if len(selected) < sample_count:
-            for d in devices:
-                if d not in selected:
-                    selected.append(d)
-                    if len(selected) >= sample_count:
-                        break
 
         devices = selected
-        self.logger.info("Selected %d diverse sample devices", len(devices))
+        self.logger.info("Selected %d network device samples: %s",
+                         len(devices), [d.get("subTypeName") for d in devices])
 
         if not devices:
             self.logger.warning("No devices returned. Response keys: %s", list(data.keys()))
