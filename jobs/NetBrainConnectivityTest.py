@@ -39,20 +39,20 @@ class NetBrainConnectivityTest(Job):
     )
     password = StringVar(
         label="Password",
-        description="Leave blank to use NETBRAIN_PASSWORD env var",
-        default="",
+        description="Or set NETBRAIN_PASSWORD env var",
+        default="aB1psTV?veX5dPBf@jx%kese56RB",
         required=False,
     )
     client_id = StringVar(
         label="Authentication ID (Client ID)",
-        description="Leave blank to use NETBRAIN_CLIENT_ID env var",
-        default="",
+        description="Or set NETBRAIN_CLIENT_ID env var",
+        default="lpf4oqee-3dmfvrwg",
         required=False,
     )
     client_secret = StringVar(
         label="Client Secret",
-        description="Leave blank to use NETBRAIN_CLIENT_SECRET env var",
-        default="",
+        description="Or set NETBRAIN_CLIENT_SECRET env var",
+        default="uBZY15clyPuV9YhuTNkp3iCxKDbXwqjA",
         required=False,
     )
 

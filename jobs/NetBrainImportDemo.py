@@ -92,12 +92,12 @@ class NetBrainImportDemo(Job):
 
     host = StringVar(default="https://10.134.98.133", label="NetBrain Host")
     username = StringVar(default="nautobotapi", label="Username")
-    password = StringVar(default="", required=False, label="Password",
-                         description="Leave blank to use NETBRAIN_PASSWORD env var")
-    client_id = StringVar(default="", required=False, label="Client ID",
-                          description="Leave blank to use NETBRAIN_CLIENT_ID env var")
-    client_secret = StringVar(default="", required=False, label="Client Secret",
-                              description="Leave blank to use NETBRAIN_CLIENT_SECRET env var")
+    password = StringVar(default="aB1psTV?veX5dPBf@jx%kese56RB", required=False, label="Password",
+                         description="Or set NETBRAIN_PASSWORD env var")
+    client_id = StringVar(default="lpf4oqee-3dmfvrwg", required=False, label="Client ID",
+                          description="Or set NETBRAIN_CLIENT_ID env var")
+    client_secret = StringVar(default="uBZY15clyPuV9YhuTNkp3iCxKDbXwqjA", required=False, label="Client Secret",
+                              description="Or set NETBRAIN_CLIENT_SECRET env var")
 
     dry_run = BooleanVar(
         label="Dry Run",
