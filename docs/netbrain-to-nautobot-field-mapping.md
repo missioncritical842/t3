@@ -209,8 +209,87 @@ Nautobot has the **nautobot_ssot** app (v4.1.0) installed. The recommended appro
 
 ---
 
+## R12.3 Live Field Discovery
+
+Based on live device data pulled from real NetBrain instances via the R12.3 API. These
+findings update and extend the original mapping above.
+
+### Device Types Found
+
+| Device Type | Count | Notes |
+|---|---|---|
+| Cisco Nexus Switch | 49 | NX-OS, VDC-capable |
+| Arista Switch | 44 | EOS |
+| Cisco IOS Switch | 49 | IOS / IOS-XE |
+| Cisco Router | 22 | IOS / IOS-XR |
+| Palo Alto Firewall | 15 | PAN-OS |
+| F5 Load Balancer | 33 | BIG-IP |
+
+### New Device Fields (not in original mapping)
+
+| Field | Type | Classification | Notes |
+|---|---|---|---|
+| `VDC_MAC` | string (MAC) | **Sensitive** | Virtual device context MAC — faked with `_fake_mac` |
+| `hasSRTunnelConfig` | bool | Safe | Segment Routing boolean flag |
+| `zone` | string | Safe (on devices) | Structural zone assignment |
+| `application` | string | Safe | Application classification |
+| `loc` | string | **Sensitive** | Full street address (e.g. "44664 Guilford Dr, 20147/Ashburn/VA/USA") — faked with `_fake_address` |
+| `bgpNeighbor` | **list of dicts** | **Sensitive** | NOT a string as originally assumed. Contains `localAsNum`, `neighborIp`, `remoteAsNum`. Sanitized via `_sanitize_json_tree` |
+
+### New Interface Fields
+
+| Field | Type | Classification | Notes |
+|---|---|---|---|
+| `vlansFrwdFabric` | structural | Safe | Fabric-forwarded VLANs |
+| `publicIps` | list/string | **Sensitive** | Public IP addresses — already handled |
+| `zone` | string | **Sensitive** | Security zone name — faked (reveals policy) |
+| `ipgateway` | string | **Sensitive** | Gateway IP — handled by IP sanitization |
+| `realIntf` | string | Safe | Real interface mapping |
+| `realName` | string | Safe | Real interface name mapping |
+| `tunnelMode` | string | Safe | Tunnel encapsulation mode |
+| `contextIntfName` | string | Safe | Context interface name |
+| `contextName` | string | Safe | Security context name |
+| `bgID` | structural | Safe | Bridge group ID |
+| `bgVlans` | structural | Safe | Bridge group VLANs |
+| `intfVlanId` | structural | Safe | Interface VLAN ID |
+| `activeVlan` | structural | Safe | Active VLAN |
+| `isFailover` | bool | Safe | Failover boolean |
+| `isL2Overlay` | bool | Safe | L2 overlay boolean |
+| `isLocalIntf` | bool | Safe | Local interface boolean |
+| `isNatIntf` | bool | Safe | NAT interface boolean |
+| `isBPE` | bool | Safe | BPE boolean |
+| `COSConfig` | structural | Safe | Class of Service config |
+| `COSDefaultValue` | structural | Safe | CoS default value |
+| `ESILAG` | structural | Safe | ESI-LAG config |
+| `MCLAG` | structural | Safe | MC-LAG config |
+| `MTU` | int | Safe | Maximum transmission unit |
+| `QinQProperties` | structural | Safe | Q-in-Q encapsulation properties |
+| `BPEIntf` | structural | Safe | BPE interface |
+| `BPENumber` | structural | Safe | BPE number |
+| `BPENumberPortChannel` | structural | Safe | BPE port-channel number |
+| `VPLSPEIntf` | structural | Safe | VPLS PE interface |
+
+### Interface Field Counts by Device Type
+
+Field count varies by platform:
+
+- **Arista Switch:** 52 interface fields
+- **Cisco Nexus Switch:** 53 fields (adds `vlansFrwdFabric`)
+- **Palo Alto Firewall:** 54 fields (adds `publicIps`, `zone`)
+
+### Key Corrections
+
+- **`bgpNeighbor`** is a **list of dicts**, not a string. Each entry has keys
+  `localAsNum`, `neighborIp`, `remoteAsNum`. The sanitizer now uses
+  `_sanitize_json_tree` for list values.
+- **`loc`** contains full street addresses (e.g. `"44664 Guilford Dr,
+  20147/Ashburn/VA/USA"`), not just a site reference. Now faked with
+  `_fake_address`.
+
+---
+
 ## Sources
 
-- [NetBrain REST API R11.1b — Device Attributes](https://github.com/NetBrainAPI/NetBrain-REST-API-R11.1b)
+- [NetBrain REST API R12.3 — Device Attributes](https://github.com/NetBrainAPI/NetBrain-REST-API-R12.3)
 - [NetBrain REST API V8.03 — Interface Attributes](https://github.com/NetBrainAPI/NetBrain-REST-API-V8.03/blob/master/REST%20APIs%20Documentation/Device%20Interfaces%20Management/Get%20Interface%20Attributes%20API.md)
 - Nautobot 3.0.6 GraphQL introspection (live from `netbrain.crbg.nautobot.cloud`)

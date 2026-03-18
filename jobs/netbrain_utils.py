@@ -7,9 +7,11 @@ Provides
 --------
 _sanitize_enabled()             Check NAUTOBOT_FAKER env var
 _fake_hostname / _fake_ip_cidr / _fake_serial / etc.   Deterministic fakers
+_fake_address()                 Deterministic fake street address
 _sanitize_json_tree()           Recursive JSON value faking
 _sanitize_device_attrs()        Fake sensitive device fields
 _sanitize_interface_attrs()     Fake sensitive interface fields
+_sanitize_log_value()           Safe log masking (always active)
 _parse_site_path()              Parse NetBrain site path to segments
 _utc_now_iso()                  Timezone-aware UTC ISO timestamp
 _normalize_ip()                 Parse IP string to CIDR notation
@@ -79,6 +81,18 @@ _LAST_NAMES = [
     "Roberts", "Robinson", "Rodriguez", "Scott", "Smith", "Taylor",
     "Thomas", "Thompson", "Torres", "Turner", "Walker", "White",
     "Williams", "Wilson", "Wright", "Young",
+]
+_STREETS = [
+    "Main St", "Oak Ave", "Elm St", "Park Blvd", "Cedar Rd", "Maple Dr",
+    "Ridge Way", "Valley Ln", "Hill Rd", "Lake Dr", "River Rd", "Forest Ave",
+]
+_CITIES = [
+    "Springfield", "Riverdale", "Lakewood", "Fairview", "Hillcrest", "Oakdale",
+    "Maplewood", "Clearwater", "Sunrise", "Westfield", "Greenville", "Newport",
+]
+_US_STATES = [
+    "AL", "AZ", "CA", "CO", "FL", "GA", "IL", "MA", "MI", "MN",
+    "MO", "NC", "NJ", "NV", "NY", "OH", "OR", "PA", "TN", "TX", "UT", "VA", "WA", "WI",
 ]
 
 
@@ -163,6 +177,51 @@ def _fake_description(real_descr: str) -> str:
     return _fake_str(real_descr)
 
 
+def _fake_address(real_addr: str) -> str:
+    """Deterministic fake US street address in 'NNNN Street, ZIPCODE/City/ST/USA' format."""
+    if not real_addr or not real_addr.strip():
+        return real_addr
+    rng = _rng(real_addr)
+    number = rng.randint(100, 99999)
+    street = rng.choice(_STREETS)
+    zipcode = rng.randint(10000, 99999)
+    city = rng.choice(_CITIES)
+    state = rng.choice(_US_STATES)
+    return f"{number} {street}, {zipcode}/{city}/{state}/USA"
+
+
+# ---------------------------------------------------------------------------
+# Safe log masking (always active, even when faker is OFF)
+# ---------------------------------------------------------------------------
+
+_LOG_IP_RE = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
+_LOG_SERIAL_RE = re.compile(r"(?i)\b[A-Z0-9]{8,}\b")
+
+
+def _sanitize_log_value(key: str, value: Any) -> str:
+    """Return a safe string for logging — masks IPs, serials, hostnames even when faker is OFF."""
+    if value is None:
+        return "None"
+    s = str(value)
+    nk = _norm_key(key)
+    if nk in _KEY_IP or nk in {"mgmtip", "ip", "ipaddress", "neighborip"}:
+        return _LOG_IP_RE.sub("x.x.x.x", s)
+    if nk in _KEY_SERIAL or nk in {"sn", "serial", "serialnumber", "module_serial"}:
+        return f"SN-xxxx"
+    if nk in _KEY_HOSTNAME or nk in {"name", "hostname", "snmpname", "devicename"}:
+        if len(s) > 3:
+            return s[:3] + "***"
+        return "***"
+    if nk in {"macaddr", "vdc_mac"}:
+        return "xx:xx:xx:xx:xx:xx"
+    if nk in {"loc", "geolocation", "site"}:
+        return "<masked-location>"
+    if nk in {"contact"}:
+        return "<masked-contact>"
+    # Fall through: mask any embedded IPs
+    return _LOG_IP_RE.sub("x.x.x.x", s)
+
+
 # ---------------------------------------------------------------------------
 # Field-level sanitization for NetBrain objects
 # ---------------------------------------------------------------------------
@@ -177,8 +236,11 @@ _DEVICE_FAKE_FIELDS = {
     "contact": _fake_name,
     "descr": _fake_description,
     "snmpName": _fake_hostname,
-    "bgpNeighbor": _fake_str,
     "geolocation": _fake_str,
+    "loc": _fake_address,
+    "VDC_MAC": _fake_mac,
+    # NOTE: bgpNeighbor is a list of dicts (not a string) — handled in
+    # _sanitize_device_attrs via _sanitize_json_tree.
 }
 
 # Device fields that are safe to keep real (structural/classification)
@@ -199,6 +261,8 @@ _DEVICE_SAFE_FIELDS = frozenset({
     "APMeshRole", "BPE", "OTV", "VPLS", "VXLAN", "Table",
     "_nb_features", "ap_mode", "cluster", "l3vniVrf",
     "vADCid", "vADCs",
+    # R12.3 live discovery — structural fields
+    "hasSRTunnelConfig", "application", "zone",
 })
 
 # Interface fields that need faking
@@ -206,7 +270,20 @@ _INTF_FAKE_FIELDS = {
     "name": _fake_hostname,
     "macAddr": _fake_mac,
     "descr": _fake_description,
+    "zone": _fake_str,  # security zone names can reveal policy
 }
+
+# Interface fields that are safe to keep real (structural/classification)
+# R12.3 live discovery additions:
+#   vlansFrwdFabric, MTU, COSConfig, COSDefaultValue — structural
+#   ESILAG, MCLAG — structural
+#   BPEIntf, BPENumber, BPENumberPortChannel, VPLSPEIntf — structural
+#   QinQProperties — structural
+#   bgID, bgVlans — structural
+#   contextIntfName, contextName — structural
+#   realIntf, realName — structural
+#   tunnelMode — structural
+#   isFailover, isL2Overlay, isLocalIntf, isNatIntf, isBPE, isTransparent — structural booleans
 
 
 def _sanitize_device_attrs(attrs: dict) -> dict:
@@ -221,8 +298,12 @@ def _sanitize_device_attrs(attrs: dict) -> dict:
             out[key] = faker(val)
         elif key == "site" and isinstance(val, str):
             out[key] = _fake_site_path(val)
-        elif key == "loc" and isinstance(val, str):
-            out[key] = _fake_site_segment(val)
+        elif key == "bgpNeighbor" and isinstance(val, list):
+            # bgpNeighbor is a list of dicts with localAsNum, neighborIp,
+            # remoteAsNum — sanitize the whole tree
+            out[key] = _sanitize_json_tree(val, seed_prefix="bgpNeighbor")
+        elif key == "VDC_MAC" and isinstance(val, str):
+            out[key] = _fake_mac(val)
         else:
             out[key] = val
     return out
@@ -249,6 +330,8 @@ def _sanitize_interface_attrs(attrs: dict) -> dict:
                 out[key] = _fake_ip(val)
             else:
                 out[key] = val
+        elif key == "zone" and isinstance(val, str):
+            out[key] = _fake_str(val)
         else:
             out[key] = val
     return out
