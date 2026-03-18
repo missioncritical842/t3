@@ -48,30 +48,30 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 V1 = "/ServicesAPI/API/V1"
 
-# NetBrain device categories from the live instance (13 categories, ~937 devices)
-# These are the REAL network infrastructure devices we want to import.
-# Everything else (AWS, Azure, End System, IP Phone) is filtered out.
+# NetBrain device categories from the live instance (~957 devices)
+# Matches the Device Category tree confirmed by the client.
 TARGET_SUBTYPES = {
-    # Routers (55)
+    # Router (55)
     "Cisco Router", "AWS DX Router", "NetScout Router",
     # L3 Switches (299)
     "Cisco IOS Switch", "Cisco Nexus Switch", "Cisco ACI Spine Switch",
-    "Arista Switch", "Aruba Switch", "Cisco Meraki Switch",
-    # LAN Switch
-    "LAN Switch",
-    # Firewalls (126)
+    "Arista Switch", "Aruba Switch", "Cisco Meraki Switch", "LAN Switch",
+    # Firewall (126)
     "Palo Alto Firewall", "Cisco Meraki Firewall",
     # Load Balancers (33)
     "F5 Load Balancer",
-    # WAN Optimizers (28)
+    # WAN Optimizer (28)
     "SilverPeak WAN Optimizer",
     # WLC (6)
     "Cisco WLC",
-    # WAP (390)
+    # Wireless Access Points (390)
     "Cisco Meraki AP", "Aruba IAP", "LWAP",
-    # Other network gear
-    "Cisco ISE", "Cisco Meraki Controller", "Cisco Meraki Z-Series Gateway",
+    # IP Phone (14)
+    "IP Phone",
+    # Unclassified Devices (6)
     "Unclassified Device",
+    # Other network gear (ancillary)
+    "Cisco ISE", "Cisco Meraki Controller", "Cisco Meraki Z-Series Gateway",
 }
 
 
