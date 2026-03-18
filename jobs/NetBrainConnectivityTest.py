@@ -39,30 +39,31 @@ class NetBrainConnectivityTest(Job):
     )
     password = StringVar(
         label="Password",
-        description="Or set NETBRAIN_PASSWORD env var",
-        default="aB1psTV?veX5dPBf@jx%kese56RB",
+        description="Leave blank to use stored credentials",
+        default="",
         required=False,
     )
     client_id = StringVar(
         label="Authentication ID (Client ID)",
-        description="Or set NETBRAIN_CLIENT_ID env var",
-        default="lpf4oqee-3dmfvrwg",
+        description="Leave blank to use stored credentials",
+        default="",
         required=False,
     )
     client_secret = StringVar(
         label="Client Secret",
-        description="Or set NETBRAIN_CLIENT_SECRET env var",
-        default="uBZY15clyPuV9YhuTNkp3iCxKDbXwqjA",
+        description="Leave blank to use stored credentials",
+        default="",
         required=False,
     )
 
     def run(self, host="", username="", password="", client_id="", client_secret="", **kwargs):
         import os
+        stored = self._load_stored_creds()
         host = (host or "").rstrip("/")
-        username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "nautobotapi")
-        password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "")
-        client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "")
-        client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "")
+        username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "") or stored.get("username", "nautobotapi")
+        password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "") or stored.get("password", "")
+        client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "") or stored.get("client_id", "")
+        client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "") or stored.get("client_secret", "")
         login_url = f"{host}{NETBRAIN_API_BASE}/Session"
 
         # --- Step 1: Login ---
@@ -141,6 +142,17 @@ class NetBrainConnectivityTest(Job):
 
         self.logger.info("NetBrain connectivity test PASSED.")
         return "SUCCESS"
+
+    def _load_stored_creds(self):
+        """Load NetBrain credentials from ConfigContext 'NetBrain Credentials'."""
+        try:
+            from nautobot.extras.models import ConfigContext
+            ctx = ConfigContext.objects.filter(name="NetBrain Credentials").first()
+            if ctx and ctx.data:
+                return ctx.data
+        except Exception:
+            pass
+        return {}
 
 
 register_jobs(NetBrainConnectivityTest)

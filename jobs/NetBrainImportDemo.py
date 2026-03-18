@@ -92,12 +92,12 @@ class NetBrainImportDemo(Job):
 
     host = StringVar(default="https://10.134.98.133", label="NetBrain Host")
     username = StringVar(default="nautobotapi", label="Username")
-    password = StringVar(default="aB1psTV?veX5dPBf@jx%kese56RB", required=False, label="Password",
-                         description="Or set NETBRAIN_PASSWORD env var")
-    client_id = StringVar(default="lpf4oqee-3dmfvrwg", required=False, label="Client ID",
-                          description="Or set NETBRAIN_CLIENT_ID env var")
-    client_secret = StringVar(default="uBZY15clyPuV9YhuTNkp3iCxKDbXwqjA", required=False, label="Client Secret",
-                              description="Or set NETBRAIN_CLIENT_SECRET env var")
+    password = StringVar(default="", required=False, label="Password",
+                         description="Leave blank to use stored credentials")
+    client_id = StringVar(default="", required=False, label="Client ID",
+                          description="Leave blank to use stored credentials")
+    client_secret = StringVar(default="", required=False, label="Client Secret",
+                              description="Leave blank to use stored credentials")
 
     dry_run = BooleanVar(
         label="Dry Run",
@@ -121,11 +121,12 @@ class NetBrainImportDemo(Job):
 
         import os
         host = (host or "").rstrip("/")
-        # Env var fallbacks when form fields are blank
-        username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "nautobotapi")
-        password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "")
-        client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "")
-        client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "")
+        # Load stored credentials: env vars first, then ConfigContext fallback
+        stored = self._load_stored_creds()
+        username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "") or stored.get("username", "nautobotapi")
+        password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "") or stored.get("password", "")
+        client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "") or stored.get("client_id", "")
+        client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "") or stored.get("client_secret", "")
         device_limit = max(1, min(int(device_limit or 5), 20))
         # Always fake for demo safety
         faker_on = True
@@ -347,6 +348,17 @@ class NetBrainImportDemo(Job):
         except Exception:
             pass
         return None
+
+    def _load_stored_creds(self):
+        """Load NetBrain credentials from ConfigContext 'NetBrain Credentials'."""
+        try:
+            from nautobot.extras.models import ConfigContext
+            ctx = ConfigContext.objects.filter(name="NetBrain Credentials").first()
+            if ctx and ctx.data:
+                return ctx.data
+        except Exception:
+            pass
+        return {}
 
     def _logout(self, host, headers):
         try:
