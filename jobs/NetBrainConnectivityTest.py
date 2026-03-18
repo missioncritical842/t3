@@ -39,23 +39,30 @@ class NetBrainConnectivityTest(Job):
     )
     password = StringVar(
         label="Password",
-        description="NetBrain password",
+        description="Leave blank to use NETBRAIN_PASSWORD env var",
         default="",
         required=False,
     )
     client_id = StringVar(
         label="Authentication ID (Client ID)",
+        description="Leave blank to use NETBRAIN_CLIENT_ID env var",
         default="",
         required=False,
     )
     client_secret = StringVar(
         label="Client Secret",
+        description="Leave blank to use NETBRAIN_CLIENT_SECRET env var",
         default="",
         required=False,
     )
 
     def run(self, host="", username="", password="", client_id="", client_secret="", **kwargs):
-        host = host.rstrip("/")
+        import os
+        host = (host or "").rstrip("/")
+        username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "nautobotapi")
+        password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "")
+        client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "")
+        client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "")
         login_url = f"{host}{NETBRAIN_API_BASE}/Session"
 
         # --- Step 1: Login ---

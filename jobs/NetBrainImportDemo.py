@@ -90,11 +90,14 @@ class NetBrainImportDemo(Job):
         commit_default = False
         has_sensitive_variables = True
 
-    host = StringVar(default="https://10.134.98.133")
-    username = StringVar(default="nautobotapi")
-    password = StringVar(default="", required=False)
-    client_id = StringVar(default="", required=False)
-    client_secret = StringVar(default="", required=False)
+    host = StringVar(default="https://10.134.98.133", label="NetBrain Host")
+    username = StringVar(default="nautobotapi", label="Username")
+    password = StringVar(default="", required=False, label="Password",
+                         description="Leave blank to use NETBRAIN_PASSWORD env var")
+    client_id = StringVar(default="", required=False, label="Client ID",
+                          description="Leave blank to use NETBRAIN_CLIENT_ID env var")
+    client_secret = StringVar(default="", required=False, label="Client Secret",
+                              description="Leave blank to use NETBRAIN_CLIENT_SECRET env var")
 
     dry_run = BooleanVar(
         label="Dry Run",
@@ -116,7 +119,13 @@ class NetBrainImportDemo(Job):
             client_secret="", dry_run=True, device_limit=5,
             sync_interfaces=True, **kwargs):
 
+        import os
         host = (host or "").rstrip("/")
+        # Env var fallbacks when form fields are blank
+        username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "nautobotapi")
+        password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "")
+        client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "")
+        client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "")
         device_limit = max(1, min(int(device_limit or 5), 20))
         # Always fake for demo safety
         faker_on = True
