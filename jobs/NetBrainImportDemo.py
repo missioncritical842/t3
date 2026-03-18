@@ -306,7 +306,7 @@ class NetBrainImportDemo(Job):
         seen_types_found = {}
         skip = 0
         pages = 0
-        max_pages = 120  # up to 12,000 devices
+        max_pages = 260  # up to 26,000 devices (full inventory)
 
         self.logger.info("Scanning inventory for network devices...")
         self.logger.info("  Target types: %s", sorted(target_types))
