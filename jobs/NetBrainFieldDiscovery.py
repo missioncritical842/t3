@@ -291,76 +291,81 @@ class NetBrainFieldDiscovery(Job):
         self.logger.info("DEVICE FIELD DISCOVERY")
         self.logger.info("=" * 60)
 
-        # Use site-based queries to find real network devices directly
-        # Deep dive confirmed AM5 Data Center has 1,322 devices including Cisco/Arista/etc.
+        # Sites/Devices returns hostnames but not subTypeName.
+        # Get hostnames from datacenter sites, sample them, fetch attributes to find types.
+        import time
+        import random as _random
+
         all_devices = []
+        site_hostnames = []
+
         target_sites = [
             "My Network/DataCenter-AMER/AM5/AM5 - Data Center",
             "My Network/DataCenter-AMER/AM6/AM6 - Data Center",
-            "My Network/DataCenter-EMEA/EM3-DataCenter",
-            "My Network/CRBGF Branch Offices",
         ]
         for site_path in target_sites:
             self.logger.info("Querying devices at site: %s", site_path)
             try:
                 resp = requests.get(
                     f"{host}{NETBRAIN_API_BASE}/CMDB/Sites/Devices",
-                    params={"sitePath": site_path, "limit": 100},
+                    params={"sitePath": site_path},
                     headers=headers, verify=False, timeout=60)
                 if resp.status_code == 200:
                     data = resp.json()
                     site_devs = data.get("devices", data.get("data", []))
                     self.logger.info("  Got %d devices from %s", len(site_devs), site_path)
-                    # Log types found
-                    site_types = {}
                     for d in site_devs:
-                        st = d.get("subTypeName", d.get("deviceTypeName", "?"))
-                        site_types[st] = site_types.get(st, 0) + 1
-                    self.logger.info("  Types: %s", site_types)
-                    all_devices.extend(site_devs)
+                        hn = d.get("hostname", d.get("name", ""))
+                        if hn:
+                            site_hostnames.append(hn)
                 else:
                     self.logger.info("  HTTP %s: %s", resp.status_code, resp.text[:300])
             except Exception as exc:
                 self.logger.warning("  Failed: %s", exc)
 
-        # Also try paginated /CMDB/Devices but only if we didn't find enough network gear
+        self.logger.info("Total site hostnames collected: %d", len(site_hostnames))
+
         NETWORK_TYPES = {
             "Cisco IOS Switch", "Cisco Router", "Cisco Nexus Switch",
             "Cisco ACI Spine Switch", "Arista Switch", "Palo Alto Firewall",
             "F5 Load Balancer", "Aruba Switch", "SilverPeak WAN Optimizer",
             "Cisco Meraki Firewall", "Cisco Meraki Switch", "Cisco WLC",
             "Cisco Meraki AP", "Aruba IAP", "Cisco ISE", "LWAP",
+            "Cisco Meraki Controller", "Cisco Meraki Z-Series Gateway",
+            "AWS DX Router", "NetScout Router",
         }
-        network_devs = [d for d in all_devices
-                        if d.get("subTypeName", d.get("deviceTypeName", "")) in NETWORK_TYPES]
-        self.logger.info("Network devices from site queries: %d", len(network_devs))
 
-        if len(network_devs) < sample_count:
-            self.logger.info("Supplementing with paginated scan...")
-            import time
-            url = f"{host}{NETBRAIN_API_BASE}/CMDB/Devices"
-            skip = 9500
-            for page in range(15):
+        # Sample random hostnames and fetch their attributes
+        if site_hostnames:
+            _random.seed(42)
+            sample_hosts = _random.sample(site_hostnames, min(60, len(site_hostnames)))
+            self.logger.info("Probing %d random hostnames for device types...", len(sample_hosts))
+
+            type_counts = {}
+            for i, hn in enumerate(sample_hosts):
                 try:
-                    time.sleep(1)  # rate limit protection
-                    resp = requests.get(url, headers=headers, verify=False, timeout=60,
-                                        params={"skip": skip, "limit": 100})
-                    if resp.status_code != 200 or not resp.json().get("devices"):
-                        break
-                    batch = resp.json()["devices"]
-                    for d in batch:
-                        st = d.get("subTypeName", "")
+                    time.sleep(0.5)  # rate limit protection
+                    resp = requests.get(
+                        f"{host}{NETBRAIN_API_BASE}/CMDB/Devices/Attributes",
+                        params={"hostname": hn},
+                        headers=headers, verify=False, timeout=30)
+                    if resp.status_code == 200:
+                        attrs = resp.json().get("attributes", {})
+                        st = attrs.get("subTypeName", "?")
+                        type_counts[st] = type_counts.get(st, 0) + 1
                         if st in NETWORK_TYPES:
-                            all_devices.append(d)
-                            network_devs.append(d)
-                    skip += len(batch)
-                    if len(batch) < 100:
-                        break
-                except Exception:
-                    break
-            self.logger.info("After paginated scan: %d network devices total", len(network_devs))
+                            all_devices.append({"name": hn, "subTypeName": st, "_attrs": attrs})
+                    if (i + 1) % 10 == 0:
+                        self.logger.info("  Probed %d/%d, types so far: %s",
+                                         i + 1, len(sample_hosts), type_counts)
+                except Exception as exc:
+                    self.logger.info("  %s: %s", hn, exc)
 
-        self.logger.info("Total devices collected: %d (network: %d)", len(all_devices), len(network_devs))
+            self.logger.info("Sampled type distribution: %s", type_counts)
+            self.logger.info("Network devices found: %d", len(all_devices))
+
+        non_aws_found = len(all_devices)
+        self.logger.info("Total network devices for field discovery: %d", non_aws_found)
         devices = all_devices
 
         # Log all unique subTypeNames to see device diversity
@@ -414,26 +419,30 @@ class NetBrainFieldDiscovery(Job):
 
         for i, dev in enumerate(devices[:sample_count]):
             self.logger.info("-" * 50)
-            self.logger.info("DEVICE %d/%d", i + 1, sample_count)
+            self.logger.info("DEVICE %d/%d: %s (%s)", i + 1, sample_count,
+                             dev.get("name", "?"), dev.get("subTypeName", "?"))
             self.logger.info("-" * 50)
-
-            # Log all top-level keys
-            self.logger.info("Top-level keys: %s", sorted(dev.keys()))
-
-            # Log each field with its type and a sample value
-            for key in sorted(dev.keys()):
-                val = dev[key]
-                val_type = type(val).__name__
-                val_preview = str(val)[:200]
-                self.logger.info("  %s (%s): %s", key, val_type, val_preview)
 
             hostname = dev.get("name", dev.get("hostname", "unknown"))
 
-            # Fetch full device attributes
-            self._fetch_device_attributes(host, headers, hostname)
+            # Use pre-fetched attrs if available, otherwise fetch
+            if "_attrs" in dev:
+                attrs = dev["_attrs"]
+                self.logger.info("DEVICE ATTRIBUTES (pre-fetched):")
+                self.logger.info("  Attribute keys: %s", sorted(attrs.keys()))
+                for key in sorted(attrs.keys()):
+                    val = attrs[key]
+                    if val and (not isinstance(val, str) or val.strip()):
+                        val_type = type(val).__name__
+                        val_preview = str(val)[:300]
+                        self.logger.info("  ATTR %s (%s): %s", key, val_type, val_preview)
+            else:
+                self._fetch_device_attributes(host, headers, hostname)
 
             # Fetch interfaces
             if fetch_interfaces:
+                import time
+                time.sleep(0.5)
                 self._fetch_interfaces(host, headers, hostname)
 
     def _try_alternate_device_endpoints(self, host, headers, sample_count, fetch_interfaces):
