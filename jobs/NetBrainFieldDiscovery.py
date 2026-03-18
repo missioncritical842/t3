@@ -289,8 +289,8 @@ class NetBrainFieldDiscovery(Job):
 
         all_devices = []
         non_aws_found = 0
-        skip = 0
-        max_pages = 110  # scan full inventory (~11000 devices)
+        skip = 9500  # skip past AWS/EndSystem/Azure blocks to reach network devices
+        max_pages = 20  # scan ~2000 more where the real gear lives
         pages = 0
         while pages < max_pages:
             try:
