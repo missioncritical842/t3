@@ -8,6 +8,7 @@ for this demo job to protect sensitive data. Logs are sanitized.
 from __future__ import annotations
 
 import json
+import os
 import time
 
 import requests
@@ -47,15 +48,30 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 V1 = "/ServicesAPI/API/V1"
 
-# Network device types worth importing
-NETWORK_TYPES = {
-    "Cisco IOS Switch", "Cisco Router", "Cisco Nexus Switch",
-    "Cisco ACI Spine Switch", "Arista Switch", "Palo Alto Firewall",
-    "F5 Load Balancer", "Aruba Switch", "SilverPeak WAN Optimizer",
-    "Cisco Meraki Firewall", "Cisco Meraki Switch", "Cisco WLC",
-    "Cisco Meraki AP", "Aruba IAP", "Cisco ISE", "LWAP",
-    "Cisco Meraki Controller", "Cisco Meraki Z-Series Gateway",
-    "AWS DX Router", "NetScout Router",
+# NetBrain device categories from the live instance (13 categories, ~937 devices)
+# These are the REAL network infrastructure devices we want to import.
+# Everything else (AWS, Azure, End System, IP Phone) is filtered out.
+TARGET_SUBTYPES = {
+    # Routers (55)
+    "Cisco Router", "AWS DX Router", "NetScout Router",
+    # L3 Switches (299)
+    "Cisco IOS Switch", "Cisco Nexus Switch", "Cisco ACI Spine Switch",
+    "Arista Switch", "Aruba Switch", "Cisco Meraki Switch",
+    # LAN Switch
+    "LAN Switch",
+    # Firewalls (126)
+    "Palo Alto Firewall", "Cisco Meraki Firewall",
+    # Load Balancers (33)
+    "F5 Load Balancer",
+    # WAN Optimizers (28)
+    "SilverPeak WAN Optimizer",
+    # WLC (6)
+    "Cisco WLC",
+    # WAP (390)
+    "Cisco Meraki AP", "Aruba IAP", "LWAP",
+    # Other network gear
+    "Cisco ISE", "Cisco Meraki Controller", "Cisco Meraki Z-Series Gateway",
+    "Unclassified Device",
 }
 
 
@@ -69,8 +85,6 @@ def _mask(val, kind="str"):
         if len(parts) == 4:
             return f"{parts[0]}.x.x.{parts[3]}"
         return "x.x.x.x"
-    if kind == "serial":
-        return f"{s[:3]}***"
     if kind == "host":
         return f"{s[:4]}***" if len(s) > 4 else "***"
     return f"{s[:6]}..." if len(s) > 6 else s
@@ -82,10 +96,9 @@ class NetBrainImportDemo(Job):
     class Meta:
         name = "NetBrain: Import Demo"
         description = (
-            "Fetches network devices from NetBrain datacenter sites and imports "
-            "into Nautobot. Always fakes sensitive data for safe demo. "
-            "Creates Manufacturers, DeviceTypes, Roles, Platforms, Locations, "
-            "Devices, Interfaces, and IPs."
+            "Fetches network devices (routers, switches, firewalls, load balancers, "
+            "WAN optimizers, WLCs, APs) from NetBrain and imports into Nautobot. "
+            "Always fakes sensitive data. Filters out cloud/endpoint objects."
         )
         commit_default = False
         has_sensitive_variables = True
@@ -106,30 +119,37 @@ class NetBrainImportDemo(Job):
     )
     device_limit = IntegerVar(
         label="Device Limit",
-        description="Max network devices to import (1-20).",
-        default=5, required=False,
+        description="Max network devices to import (1-50).",
+        default=10, required=False,
     )
     sync_interfaces = BooleanVar(
         label="Sync Interfaces",
         description="Also import interfaces and IPs for each device.",
         default=True, required=False,
     )
+    include_waps = BooleanVar(
+        label="Include WAPs",
+        description="Include wireless access points (390 devices). Uncheck for faster demo.",
+        default=False, required=False,
+    )
 
     def run(self, host="", username="", password="", client_id="",
-            client_secret="", dry_run=True, device_limit=5,
-            sync_interfaces=True, **kwargs):
+            client_secret="", dry_run=True, device_limit=10,
+            sync_interfaces=True, include_waps=False, **kwargs):
 
-        import os
         host = (host or "").rstrip("/")
-        # Load stored credentials: env vars first, then ConfigContext fallback
         stored = self._load_stored_creds()
         username = (username or "").strip() or os.environ.get("NETBRAIN_USERNAME", "") or stored.get("username", "nautobotapi")
         password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "") or stored.get("password", "")
         client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "") or stored.get("client_id", "")
         client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "") or stored.get("client_secret", "")
-        device_limit = max(1, min(int(device_limit or 5), 20))
-        # Always fake for demo safety
-        faker_on = True
+        device_limit = max(1, min(int(device_limit or 10), 50))
+
+        # Build target set based on WAP toggle
+        target_types = set(TARGET_SUBTYPES)
+        wap_types = {"Cisco Meraki AP", "Aruba IAP", "LWAP"}
+        if not include_waps:
+            target_types -= wap_types
 
         self.logger.info("=" * 60)
         self.logger.info("NetBrain Import Demo")
@@ -137,6 +157,8 @@ class NetBrainImportDemo(Job):
         self.logger.info("  faker: ALWAYS ON (demo mode)")
         self.logger.info("  device_limit: %d", device_limit)
         self.logger.info("  sync_interfaces: %s", sync_interfaces)
+        self.logger.info("  include_waps: %s", include_waps)
+        self.logger.info("  target types: %d categories", len(target_types))
         self.logger.info("=" * 60)
 
         stats = {
@@ -146,34 +168,30 @@ class NetBrainImportDemo(Job):
             "skipped": 0, "errors": 0,
         }
 
-        # --- Login with retry ---
         token = self._login(host, username, password, client_id, client_secret)
         if not token:
             return "FAILED: login"
         headers = {"Token": token, "Content-Type": "application/json"}
 
         try:
-            # --- Set domain ---
             self._set_domain(host, headers)
 
-            # --- Pre-fetch Nautobot statuses ---
             active_status = Status.objects.get(name="Active")
             planned_status = Status.objects.get(name="Planned")
             failed_status = Status.objects.get(name="Failed")
             status_map = {"Active": active_status, "Planned": planned_status, "Failed": failed_status}
 
-            # --- Find network devices via site queries ---
-            network_devices = self._find_network_devices(host, headers, device_limit)
+            # Find network devices by scanning inventory and filtering by subTypeName
+            network_devices = self._find_network_devices(host, headers, device_limit, target_types)
             stats["devices_fetched"] = len(network_devices)
 
             if not network_devices:
-                self.logger.warning("No network devices found in datacenter sites")
+                self.logger.warning("No network devices found")
                 return json.dumps(stats)
 
-            # --- Import each device ---
-            for i, (hostname, raw_attrs) in enumerate(network_devices):
+            # Import each device
+            for i, (raw_hostname, raw_attrs) in enumerate(network_devices):
                 self.logger.info("-" * 40)
-                # Sanitize attrs for import AND logging
                 attrs = _sanitize_device_attrs(raw_attrs)
                 safe_name = attrs.get("name", "?")
                 sub_type = attrs.get("subTypeName", "?")
@@ -186,19 +204,18 @@ class NetBrainImportDemo(Job):
 
                     if sync_interfaces and device_obj and not dry_run:
                         self._import_interfaces(
-                            host, headers, hostname, device_obj,
+                            host, headers, raw_hostname, device_obj,
                             active_status, status_map, dry_run, stats,
                         )
                     elif sync_interfaces and dry_run:
-                        # Still fetch and log interface count
-                        intf_names = self._get_interfaces(host, headers, hostname)
+                        intf_names = self._get_interfaces(host, headers, raw_hostname)
                         self.logger.info("  [DRY-RUN] Would sync %d interfaces", len(intf_names))
 
                 except Exception as exc:
                     self.logger.error("  Error: %s", exc)
                     stats["errors"] += 1
 
-                time.sleep(0.5)  # rate limit protection
+                time.sleep(0.5)
 
         finally:
             self._logout(host, headers)
@@ -209,6 +226,21 @@ class NetBrainImportDemo(Job):
             self.logger.info("  %s: %d", k, v)
         self.logger.info("=" * 60)
         return json.dumps(stats)
+
+    # ------------------------------------------------------------------
+    # Credential loading
+    # ------------------------------------------------------------------
+
+    def _load_stored_creds(self):
+        """Load NetBrain credentials from ConfigContext 'NetBrain Credentials'."""
+        try:
+            from nautobot.extras.models import ConfigContext
+            ctx = ConfigContext.objects.filter(name="NetBrain Credentials").first()
+            if ctx and ctx.data:
+                return ctx.data
+        except Exception:
+            pass
+        return {}
 
     # ------------------------------------------------------------------
     # NetBrain API
@@ -266,61 +298,78 @@ class NetBrainImportDemo(Job):
         except Exception as exc:
             self.logger.warning("Domain setup: %s", exc)
 
-    def _find_network_devices(self, host, headers, limit):
-        """Query datacenter sites, sample hostnames, find network devices."""
-        import random
-        site_hostnames = []
-
-        sites = [
-            "My Network/DataCenter-AMER/AM5/AM5 - Data Center",
-            "My Network/DataCenter-AMER/AM6/AM6 - Data Center",
-        ]
-        for site_path in sites:
-            try:
-                r = requests.get(f"{host}{V1}/CMDB/Sites/Devices",
-                                 params={"sitePath": site_path},
-                                 headers=headers, verify=False, timeout=60)
-                if r.status_code == 200:
-                    devs = r.json().get("devices", [])
-                    self.logger.info("Site '%s': %d devices", site_path.split("/")[-1], len(devs))
-                    for d in devs:
-                        hn = d.get("hostname", "")
-                        if hn:
-                            site_hostnames.append(hn)
-            except Exception as exc:
-                self.logger.warning("Site query failed: %s", exc)
-
-        if not site_hostnames:
-            return []
-
-        self.logger.info("Total site hostnames: %d", len(site_hostnames))
-
-        # Sample and probe for network device types
-        random.seed(42)
-        sample = random.sample(site_hostnames, min(80, len(site_hostnames)))
+    def _find_network_devices(self, host, headers, limit, target_types):
+        """Scan inventory and collect devices matching target subTypeNames."""
         results = []
-        probed = 0
+        seen_types_found = {}
+        skip = 0
+        pages = 0
+        max_pages = 120  # up to 12,000 devices
 
-        for hn in sample:
-            if len(results) >= limit:
-                break
+        self.logger.info("Scanning inventory for network devices...")
+        self.logger.info("  Target types: %s", sorted(target_types))
+
+        while pages < max_pages and len(results) < limit:
             try:
-                time.sleep(0.5)
-                r = requests.get(f"{host}{V1}/CMDB/Devices/Attributes",
-                                 params={"hostname": hn},
-                                 headers=headers, verify=False, timeout=30)
-                if r.status_code == 200:
-                    attrs = r.json().get("attributes", {})
-                    st = attrs.get("subTypeName", "")
-                    probed += 1
-                    if st in NETWORK_TYPES:
-                        results.append((hn, attrs))
-                        self.logger.info("  Found: %s (%s)", _mask(hn, "host"), st)
-            except Exception:
-                pass
+                r = requests.get(f"{host}{V1}/CMDB/Devices",
+                                 params={"skip": skip, "limit": 100},
+                                 headers=headers, verify=False, timeout=60)
+                if r.status_code != 200:
+                    self.logger.warning("  Devices HTTP %s at skip=%d", r.status_code, skip)
+                    break
+                batch = r.json().get("devices", [])
+                if not batch:
+                    break
 
-        self.logger.info("Probed %d hostnames, found %d network devices", probed, len(results))
+                for d in batch:
+                    st = d.get("subTypeName", "")
+                    if st in target_types:
+                        hn = d.get("name", "").strip()
+                        if not hn:
+                            continue
+                        # Fetch full attributes
+                        time.sleep(0.3)
+                        attrs = self._get_device_attrs(host, headers, hn)
+                        if attrs:
+                            results.append((hn, attrs))
+                            seen_types_found[st] = seen_types_found.get(st, 0) + 1
+                            self.logger.info("  [%d/%d] Found %s (%s)",
+                                             len(results), limit,
+                                             _mask(hn, "host"), st)
+                            if len(results) >= limit:
+                                break
+
+                skip += len(batch)
+                pages += 1
+
+                if len(batch) < 100:
+                    break
+
+                # Progress log every 10 pages
+                if pages % 10 == 0:
+                    self.logger.info("  Scanned %d devices (page %d), found %d network devices...",
+                                     skip, pages, len(results))
+
+            except Exception as exc:
+                self.logger.warning("  Scan error at skip=%d: %s", skip, exc)
+                time.sleep(2)
+                skip += 100
+                pages += 1
+
+        self.logger.info("Scan complete: %d pages, %d network devices found", pages, len(results))
+        self.logger.info("  Types found: %s", seen_types_found)
         return results
+
+    def _get_device_attrs(self, host, headers, hostname):
+        try:
+            r = requests.get(f"{host}{V1}/CMDB/Devices/Attributes",
+                             params={"hostname": hostname},
+                             headers=headers, verify=False, timeout=30)
+            if r.status_code == 200:
+                return r.json().get("attributes", {})
+        except Exception:
+            pass
+        return None
 
     def _get_interfaces(self, host, headers, hostname):
         try:
@@ -348,17 +397,6 @@ class NetBrainImportDemo(Job):
         except Exception:
             pass
         return None
-
-    def _load_stored_creds(self):
-        """Load NetBrain credentials from ConfigContext 'NetBrain Credentials'."""
-        try:
-            from nautobot.extras.models import ConfigContext
-            ctx = ConfigContext.objects.filter(name="NetBrain Credentials").first()
-            if ctx and ctx.data:
-                return ctx.data
-        except Exception:
-            pass
-        return {}
 
     def _logout(self, host, headers):
         try:
@@ -389,7 +427,7 @@ class NetBrainImportDemo(Job):
         site_path = attrs.get("site", "")
         ver = (attrs.get("ver") or "").strip()
 
-        self.logger.info("  vendor=%s model=%s", vendor, model)
+        self.logger.info("  vendor=%s model=%s ver=%s", vendor, model, ver)
         self.logger.info("  site=%s", site_path)
 
         if dry_run:
@@ -412,7 +450,6 @@ class NetBrainImportDemo(Job):
 
         location = self._get_or_create_location(site_path, active_status, stats)
 
-        # Create/update device
         device, created = Device.objects.get_or_create(
             name=name,
             defaults={
@@ -459,7 +496,6 @@ class NetBrainImportDemo(Job):
         cf = device._custom_field_data or {}
         cf["system_of_record"] = "NetBrain"
         cf["last_synced_from_sor"] = _utc_now_iso()[:10]
-        # Store sanitized observation
         obs = cf.get("observations") or {}
         if not isinstance(obs, dict):
             obs = {}
@@ -494,7 +530,7 @@ class NetBrainImportDemo(Job):
 
         self.logger.info("  Importing %d interfaces...", len(intf_names))
 
-        for intf_name in intf_names[:30]:  # cap per device
+        for intf_name in intf_names[:30]:
             if not isinstance(intf_name, str) or not intf_name.strip():
                 continue
 
@@ -503,7 +539,6 @@ class NetBrainImportDemo(Job):
             if not raw_attrs:
                 continue
 
-            # Always sanitize
             attrs = _sanitize_interface_attrs(raw_attrs)
 
             nb_name = (attrs.get("name") or intf_name).strip()
@@ -541,7 +576,6 @@ class NetBrainImportDemo(Job):
                     intf_obj.validated_save()
                     stats["interfaces_updated"] += 1
 
-            # Sync IPs
             ips = attrs.get("ips", [])
             if isinstance(ips, list):
                 for ip_entry in ips:
@@ -554,16 +588,15 @@ class NetBrainImportDemo(Job):
         cidr = _normalize_ip(ip_str)
         if not cidr:
             return
-
         self._ensure_prefix(cidr, active_status)
         ip_obj, created = IPAddress.objects.get_or_create(
             address=cidr, defaults={"status": active_status})
         if created:
             stats["ips_created"] += 1
 
-        # Use the actual mgmtIntf name if we have it, else "mgmt0"
+        mgmt_name = "mgmt0"
         mgmt_intf, _ = Interface.objects.get_or_create(
-            device=device, name="mgmt0",
+            device=device, name=mgmt_name,
             defaults={"type": "virtual", "status": active_status})
 
         IPAddressToInterface.objects.get_or_create(
@@ -604,7 +637,6 @@ class NetBrainImportDemo(Job):
         if not segments:
             segments = ["Unassigned"]
 
-        # Ensure LocationTypes
         region_type, _ = LocationType.objects.get_or_create(
             name="Region", defaults={"nestable": True})
         site_type, _ = LocationType.objects.get_or_create(
@@ -613,7 +645,6 @@ class NetBrainImportDemo(Job):
             site_type.parent = region_type
             site_type.validated_save()
 
-        # Build hierarchy
         parent = None
         for seg in segments[:-1]:
             loc, created = Location.objects.get_or_create(
