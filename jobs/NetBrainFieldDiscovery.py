@@ -129,12 +129,20 @@ class NetBrainFieldDiscovery(Job):
             body["client_secret"] = client_secret
 
         self.logger.info("Logging in to %s ...", login_url)
-        try:
-            resp = requests.post(login_url, json=body,
-                                 headers={"Content-Type": "application/json"},
-                                 verify=False, timeout=15)
-        except Exception as exc:
-            self.logger.error("Login failed: %s", exc)
+        import time
+        resp = None
+        for attempt in range(3):
+            try:
+                resp = requests.post(login_url, json=body,
+                                     headers={"Content-Type": "application/json"},
+                                     verify=False, timeout=60)
+                break
+            except Exception as exc:
+                self.logger.warning("Login attempt %d failed: %s", attempt + 1, exc)
+                if attempt < 2:
+                    time.sleep(10)
+        if resp is None:
+            self.logger.error("Login failed after 3 attempts")
             return None
 
         if resp.status_code != 200:
@@ -294,7 +302,7 @@ class NetBrainFieldDiscovery(Job):
         pages = 0
         while pages < max_pages:
             try:
-                resp = requests.get(url, headers=headers, verify=False, timeout=30,
+                resp = requests.get(url, headers=headers, verify=False, timeout=60,
                                     params={"skip": skip, "limit": 100})
             except Exception as exc:
                 self.logger.error("Device fetch failed: %s", exc)
