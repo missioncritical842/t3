@@ -285,8 +285,14 @@ class NetBrainImportDemo(Job):
         return {}
 
     def _ensure_fallback_location(self, active_status):
-        """Get or create a placeholder location for devices (rollup assigns real location)."""
+        """Get or create a placeholder location for devices (rollup assigns real location).
+        Uses Controllers location if it exists (immune to wipe), else creates Placeholder."""
         from nautobot.dcim.models import Location, LocationType
+        # Try to use existing Controllers location (can't be wiped)
+        controllers = Location.objects.filter(name="Controllers").first()
+        if controllers:
+            self.logger.info("Using existing 'Controllers' location as fallback")
+            return controllers
         lt, _ = LocationType.objects.get_or_create(name="Site", defaults={"nestable": False})
         loc, _ = Location.objects.get_or_create(
             name="Placeholder Site", location_type=lt,
