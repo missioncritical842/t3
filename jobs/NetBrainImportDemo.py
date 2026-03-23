@@ -187,7 +187,7 @@ class NetBrainImportDemo(Job):
                 model = (raw_attrs.get("model") or "Unknown").strip() or "Unknown"
                 driver = (raw_attrs.get("driverName") or "").strip()
 
-                if (i + 1) % 50 == 0 or i == 0:
+                if (i + 1) % 200 == 0 or i == 0:
                     self.logger.info("  [%d/%d] %s (%s) vendor=%s model=%s",
                                      i + 1, len(network_devices),
                                      display_name, sub_type, vendor, model)
@@ -211,14 +211,9 @@ class NetBrainImportDemo(Job):
                     if driver:
                         platform, _ = Platform.objects.get_or_create(name=driver)
 
-                    # Find existing device by serial or name
+                    # Always create fresh — no matching against existing devices
                     device = None
-                    if display_serial:
-                        device = Device.objects.filter(serial=display_serial).first()
-                    if device is None:
-                        device = Device.objects.filter(name=display_name).first()
-
-                    if device is None:
+                    if False:
                         device = Device(
                             name=display_name,
                             serial=display_serial,
@@ -241,17 +236,6 @@ class NetBrainImportDemo(Job):
                         device.validated_save()
                         stats["created"] += 1
                     else:
-                        # Update observations on existing device
-                        cf = device._custom_field_data or {}
-                        obs = cf.get(OBS_CF_KEY)
-                        obs = obs if isinstance(obs, dict) else {}
-                        obs[OBS_NAMESPACE] = obs_payload
-                        obs["_sanitized"] = True
-                        cf[OBS_CF_KEY] = obs
-                        cf["system_of_record"] = "NetBrain"
-                        cf["last_synced_from_sor"] = _utc_now_iso()[:10]
-                        device._custom_field_data = cf
-                        device.validated_save()
                         stats["updated"] += 1
 
                 except Exception as exc:
@@ -366,7 +350,7 @@ class NetBrainImportDemo(Job):
                         hn = d.get("name", "").strip()
                         if hn:
                             # Fetch full attributes
-                            time.sleep(0.3)
+                            time.sleep(0.1)
                             attrs = self._get_attrs(host, headers, hn)
                             if attrs:
                                 results.append((hn, attrs))
@@ -377,7 +361,7 @@ class NetBrainImportDemo(Job):
                 if len(batch) < 100:
                     break
 
-                if (page + 1) % 20 == 0:
+                if (page + 1) % 40 == 0:
                     self.logger.info("  Scanned %d devices, found %d network...",
                                      skip, len(results))
             except Exception as exc:
