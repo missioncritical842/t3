@@ -222,18 +222,39 @@ class NetBrainImportDemo(Job):
             self.logger.info("NetBrain devices: %d total, %d missing, %d existing",
                              len(nb_devices), len(missing), len(existing))
 
-            # --- CSV output for missing devices ---
-            self.logger.info("")
-            self.logger.info("MISSING DEVICES (CSV):")
-            self.logger.info("hostname,faked_name,subTypeName,vendor,model,mgmtIP,site")
+            # --- Generate CSV of missing devices and save as downloadable file ---
+            import io
+            csv_buf = io.StringIO()
+            csv_buf.write("hostname,faked_name,subTypeName,vendor,model,mgmtIP,site\n")
             for hn, attrs, display_name in missing:
                 vendor = _normalize_vendor(attrs.get("vendor") or "Unknown")
-                model = (attrs.get("model") or "").strip()
+                model = (attrs.get("model") or "").strip().replace(",", ";")
                 sub_type = attrs.get("subTypeName", "")
                 mgmt_ip = (attrs.get("mgmtIP") or "").strip()
-                site = (attrs.get("site") or "").strip()
-                self.logger.info("%s,%s,%s,%s,%s,%s,%s",
-                                 hn, display_name, sub_type, vendor, model, mgmt_ip, site)
+                site = (attrs.get("site") or "").strip().replace(",", ";")
+                csv_buf.write(f"{hn},{display_name},{sub_type},{vendor},{model},{mgmt_ip},{site}\n")
+
+            csv_content = csv_buf.getvalue()
+            self.logger.info("Missing devices: %d (CSV generated)", len(missing))
+
+            # Save as downloadable FileProxy
+            if missing:
+                try:
+                    from django.core.files.base import ContentFile
+                    from nautobot.extras.models import FileProxy
+                    timestamp = _utc_now_iso()[:19].replace(":", "-")
+                    filename = f"netbrain_missing_devices_{timestamp}.csv"
+                    fp = FileProxy(name=filename)
+                    fp.file.save(filename, ContentFile(csv_content.encode("utf-8")))
+                    fp.save()
+                    download_url = f"/api/extras/file-proxies/{fp.pk}/download/"
+                    self.logger.info("CSV saved: %s", filename)
+                    self.logger.info("Download: %s", download_url)
+                except Exception as exc:
+                    self.logger.warning("Could not save CSV file: %s", exc)
+                    self.logger.info("CSV content logged below instead:")
+                    for line in csv_content.strip().split("\n")[:20]:
+                        self.logger.info("  %s", line)
 
             # --- Mode 2: Update observations on existing devices ---
             if mode in ("audit_update", "import_all"):
