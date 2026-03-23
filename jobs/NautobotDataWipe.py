@@ -277,16 +277,33 @@ class NautobotDataWipe(Job):
             # children (leaf nodes) are deleted first, then we repeat until
             # nothing remains.
             wave = 1
-            while True:
+            max_waves = 10  # prevent infinite loop on undeletable locations
+            prev_count = None
+            while wave <= max_waves:
                 # Leaf locations = those with no children pointing at them.
+                # Exclude locations referenced by Controllers (protected FK)
+                try:
+                    from nautobot.dcim.models import Controller
+                    controller_loc_ids = set(
+                        Controller.objects.values_list("location_id", flat=True)
+                    )
+                except (ImportError, Exception):
+                    controller_loc_ids = set()
+
                 leaves = Location.objects.exclude(
                     pk__in=Location.objects.filter(
                         parent__isnull=False,
                     ).values_list("parent_id", flat=True),
-                )
+                ).exclude(pk__in=controller_loc_ids)
+
                 count = leaves.count()
                 if count == 0:
                     break
+                if count == prev_count:
+                    self.logger.info("  Location wave %d: %d undeletable locations remain, stopping", wave, count)
+                    break
+                prev_count = count
+
                 self.logger.info("  Location wave %d:", wave)
                 deleted = self._delete_queryset(
                     leaves,
@@ -297,8 +314,6 @@ class NautobotDataWipe(Job):
                 total += deleted
                 wave += 1
                 if dry_run:
-                    # In dry-run nothing is actually removed so the loop
-                    # would be infinite.  One pass is enough to report.
                     break
 
             self.logger.info("--- LocationType ---")
