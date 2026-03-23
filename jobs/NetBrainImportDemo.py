@@ -284,8 +284,13 @@ class NetBrainImportDemo(Job):
 
     def _get_fallback_location(self, active_status):
         """Get or create Placeholder Site. Called before each device save to handle race conditions."""
-        from nautobot.dcim.models import Location, LocationType
+        from django.contrib.contenttypes.models import ContentType
+        from nautobot.dcim.models import Device, Location, LocationType
         lt, _ = LocationType.objects.get_or_create(name="Site", defaults={"nestable": False})
+        # Ensure Site LocationType allows devices
+        device_ct = ContentType.objects.get_for_model(Device)
+        if device_ct not in lt.content_types.all():
+            lt.content_types.add(device_ct)
         loc, _ = Location.objects.get_or_create(
             name="Placeholder Site", location_type=lt,
             defaults={"status": active_status})
