@@ -5,10 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 NetBrain-to-Nautobot integration for Corebridge. Two main components:
-1. **MCP servers** (`server.py`, `nautobot_server.py`) — expose NetBrain and Nautobot APIs as tools for Claude
+1. **MCP servers** (`nautobot_server.py` is active, `server.py` for NetBrain is built but cannot connect — see below)
 2. **Nautobot jobs** (`jobs/`) — import, rollup, diagnostic, and maintenance jobs that run inside Nautobot
 
 The repo is registered as a **Nautobot Git data source** at `https://netbrain.crbg.nautobot.cloud`. Jobs sync automatically when the repo is synced in Nautobot.
+
+### Network Topology — Critical
+- **NetBrain** (10.134.98.133) is on a private network, accessible **only from Nautobot Cloud** via VPN tunnel
+- **NetBrain is NOT accessible from WSL/Claude Code** — all NetBrain API calls must go through Nautobot jobs
+- **Nautobot Cloud** (`netbrain.crbg.nautobot.cloud`) is accessible from Claude Code via REST API and MCP
+- To interact with NetBrain: write a Nautobot job, push to GitHub, sync the repo in Nautobot, run the job
+- The NetBrain MCP server (`server.py`) was built but cannot be used until VPN access is available from the dev environment
 
 ## Key Architecture
 
