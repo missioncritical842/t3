@@ -211,9 +211,9 @@ class NetBrainImportDemo(Job):
                     if driver:
                         platform, _ = Platform.objects.get_or_create(name=driver)
 
-                    # Always create fresh — no matching against existing devices
+                    # Always create new device
                     device = None
-                    if False:
+                    if device is None:
                         device = Device(
                             name=display_name,
                             serial=display_serial,
@@ -236,7 +236,7 @@ class NetBrainImportDemo(Job):
                         device.validated_save()
                         stats["created"] += 1
                     else:
-                        stats["updated"] += 1
+                        pass  # should never reach here
 
                 except Exception as exc:
                     self.logger.error("  Error on device %d: %s", i + 1, exc)
