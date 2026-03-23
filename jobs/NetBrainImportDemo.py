@@ -1,10 +1,13 @@
 """NetBrain -> Nautobot Import (Minimal Identity + Observations).
 
-Follows Joshua's pattern: import jobs store raw vendor facts ONLY under
-observations["netbrain"]. Minimal identity fields on the Device object.
-Normalization/rollups are done by a separate rollup job.
+Four modes:
+  1) Audit Only    — scan NetBrain, log missing devices as CSV, no writes
+  2) Audit + Update — same scan, also refresh observations on existing devices
+  3) Import by List — paste hostnames from a previous audit, import those
+  4) Import All     — import every missing device (requires confirmation)
 
-NAUTOBOT_FAKER is always ON for this demo to protect sensitive data.
+Follows Joshua's pattern: raw vendor facts stored in observations["netbrain"].
+NAUTOBOT_FAKER is hardcoded ON to protect sensitive data.
 """
 
 from __future__ import annotations
@@ -16,7 +19,14 @@ import time
 import requests
 import urllib3
 
-from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar, register_jobs
+from nautobot.apps.jobs import (
+    BooleanVar,
+    ChoiceVar,
+    Job,
+    StringVar,
+    TextVar,
+    register_jobs,
+)
 from nautobot.dcim.models import Device, DeviceType, Manufacturer, Platform
 from nautobot.extras.models import Role, Status
 
@@ -35,7 +45,7 @@ V1 = "/ServicesAPI/API/V1"
 OBS_NAMESPACE = "netbrain"
 OBS_CF_KEY = "observations"
 
-# NetBrain device categories (~957 devices confirmed by client)
+# NetBrain device categories (~1,042 devices)
 TARGET_SUBTYPES = {
     # Router (55)
     "Cisco Router", "AWS DX Router", "NetScout Router",
@@ -60,14 +70,18 @@ TARGET_SUBTYPES = {
     "Cisco ISE", "Cisco Meraki Controller", "Cisco Meraki Z-Series Gateway",
 }
 
-# Vendor name normalization
+MODE_CHOICES = [
+    ("audit", "1) Audit Only — log missing devices as CSV, no writes"),
+    ("audit_update", "2) Audit + Update — log missing, refresh observations on existing"),
+    ("import_list", "3) Import by List — paste hostnames to import"),
+    ("import_all", "4) Import All Missing — requires confirmation"),
+]
+
 VENDOR_MAP = {
     "arista networks": "Arista",
     "aruba networks": "Aruba",
     "cisco systems": "Cisco",
-    "f5, inc": "F5",
-    "f5, inc.": "F5",
-    "f5 networks": "F5",
+    "f5, inc": "F5", "f5, inc.": "F5", "f5 networks": "F5",
     "palo alto networks": "Palo Alto Networks",
     "netscout": "NetScout",
 }
@@ -78,18 +92,26 @@ def _normalize_vendor(raw):
 
 
 class NetBrainImportDemo(Job):
-    """Import network devices from NetBrain: minimal identity + observations blob."""
+    """Import network devices from NetBrain with four operating modes."""
 
     class Meta:
         name = "NetBrain: Import Demo"
         description = (
-            "Minimal import: creates Device with identity fields (name, serial, "
-            "model, role, status) and stores full raw NetBrain data in the "
-            "observations custom field. Rollup job handles the rest."
+            "Four modes: (1) Audit missing devices as CSV, (2) Audit + update "
+            "observations, (3) Import from pasted list, (4) Import all missing. "
+            "Faker always ON."
         )
         commit_default = False
         has_sensitive_variables = True
 
+    # --- Mode selection ---
+    mode = ChoiceVar(
+        choices=MODE_CHOICES,
+        label="Mode",
+        description="Select operating mode",
+    )
+
+    # --- Credentials ---
     host = StringVar(default="https://10.134.98.133", label="NetBrain Host")
     username = StringVar(default="nautobotapi", label="Username")
     password = StringVar(default="", required=False, label="Password",
@@ -99,22 +121,37 @@ class NetBrainImportDemo(Job):
     client_secret = StringVar(default="", required=False, label="Client Secret",
                               description="Leave blank to use stored credentials")
 
-    dry_run = BooleanVar(
-        label="Dry Run", default=True, required=False,
-        description="Log what would happen without writing to DB.",
-    )
-    device_limit = IntegerVar(
-        label="Device Limit", default=0, required=False,
-        description="Max devices to import. 0 = ALL (~957 devices).",
-    )
+    # --- Options ---
     include_waps = BooleanVar(
         label="Include WAPs", default=False, required=False,
-        description="Include wireless APs (390 devices). Uncheck for faster run.",
+        description="Include wireless APs (~390 devices). Uncheck for faster scan.",
     )
 
-    def run(self, host="", username="", password="", client_id="",
-            client_secret="", dry_run=True, device_limit=0,
-            include_waps=False, **kwargs):
+    # --- Mode 3: Import by List ---
+    device_list = TextVar(
+        label="Device List (Mode 3 only)",
+        description="Paste hostnames from a previous audit, one per line. CSV lines accepted (hostname is first column).",
+        default="",
+        required=False,
+    )
+
+    # --- Safety confirmation for modes 3 and 4 ---
+    confirm_import = BooleanVar(
+        label="I am sure I want to import devices",
+        description="Required for modes 3 and 4.",
+        default=False,
+        required=False,
+    )
+    confirm_yes = StringVar(
+        label="Type YES to confirm",
+        description="Required for modes 3 and 4.",
+        default="",
+        required=False,
+    )
+
+    def run(self, mode="audit", host="", username="", password="",
+            client_id="", client_secret="", include_waps=False,
+            device_list="", confirm_import=False, confirm_yes="", **kwargs):
 
         host = (host or "").rstrip("/")
         stored = self._load_stored_creds()
@@ -122,24 +159,36 @@ class NetBrainImportDemo(Job):
         password = (password or "").strip() or os.environ.get("NETBRAIN_PASSWORD", "") or stored.get("password", "")
         client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "") or stored.get("client_id", "")
         client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "") or stored.get("client_secret", "")
-        device_limit = int(device_limit or 0)
-        if device_limit <= 0:
-            device_limit = 99999
+
+        # Faker always on
+        faker_on = True
+
+        # Safety check for import modes
+        if mode in ("import_list", "import_all"):
+            if not confirm_import or (confirm_yes or "").strip().upper() != "YES":
+                self.logger.error("Import requires both the confirmation checkbox AND typing YES.")
+                return "ABORTED: confirmation required"
 
         target_types = set(TARGET_SUBTYPES)
         if not include_waps:
             target_types -= {"Cisco Meraki AP", "Aruba IAP", "LWAP"}
 
         self.logger.info("=" * 60)
-        self.logger.info("NetBrain Import (Minimal Identity + Observations)")
-        self.logger.info("  dry_run: %s", dry_run)
+        self.logger.info("NetBrain Import Demo")
+        self.logger.info("  mode: %s", mode)
         self.logger.info("  faker: ALWAYS ON")
-        self.logger.info("  device_limit: %s", "ALL" if device_limit >= 99999 else device_limit)
         self.logger.info("  include_waps: %s", include_waps)
         self.logger.info("=" * 60)
 
-        stats = {"fetched": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+        stats = {"fetched": 0, "missing": 0, "existing": 0,
+                 "created": 0, "updated": 0, "errors": 0}
 
+        # --- Mode 3: Import by List (no full scan needed) ---
+        if mode == "import_list":
+            return self._run_import_list(host, username, password, client_id,
+                                          client_secret, device_list, stats)
+
+        # --- Modes 1, 2, 4: need full inventory scan ---
         token = self._login(host, username, password, client_id, client_secret)
         if not token:
             return "FAILED: login"
@@ -148,109 +197,225 @@ class NetBrainImportDemo(Job):
         try:
             self._set_domain(host, headers)
 
-            active = Status.objects.get(name="Active")
+            # Get existing device names in Nautobot
+            existing_names = set(Device.objects.values_list("name", flat=True))
+            self.logger.info("Existing devices in Nautobot: %d", len(existing_names))
 
-            # Scan inventory for target devices
-            network_devices = self._scan_inventory(host, headers, device_limit, target_types)
-            stats["fetched"] = len(network_devices)
-            self.logger.info("Found %d network devices to import", len(network_devices))
+            # Scan NetBrain inventory
+            nb_devices = self._scan_inventory(host, headers, target_types)
+            stats["fetched"] = len(nb_devices)
 
-            # Import each: minimal identity + observations
-            for i, (raw_hostname, raw_attrs) in enumerate(network_devices):
-                sub_type = raw_attrs.get("subTypeName", "Unknown")
+            # Classify each as missing or existing
+            missing = []
+            existing = []
+            for hn, attrs in nb_devices:
+                name = (attrs.get("name") or "").strip()
+                display_name = _fake_hostname(name) if name else ""
+                if display_name in existing_names:
+                    existing.append((hn, attrs, display_name))
+                else:
+                    missing.append((hn, attrs, display_name))
 
-                # Build observation payload from RAW data (before faking)
-                obs_payload = {
-                    "schema_version": 1,
-                    "meta": {
-                        "fetched_at": _utc_now_iso(),
-                        "source": "netbrain_import_demo",
-                        "nb_hostname": raw_hostname,
-                    },
-                    "data": {"remote": raw_attrs},
-                }
+            stats["missing"] = len(missing)
+            stats["existing"] = len(existing)
 
-                # Fake for display/storage
-                if _sanitize_enabled():
-                    obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
-                        "schema_version", "source", "vendor", "model",
-                        "subTypeName", "driverName", "ver", "os",
-                    }))
+            self.logger.info("NetBrain devices: %d total, %d missing, %d existing",
+                             len(nb_devices), len(missing), len(existing))
 
-                # Always fake identity fields for demo
-                serial = (raw_attrs.get("sn") or "").strip()
-                name = (raw_attrs.get("name") or "").strip()
-                display_name = _fake_hostname(name) if name else f"device-{i}"
-                display_serial = _fake_serial(serial) if serial else ""
+            # --- CSV output for missing devices ---
+            self.logger.info("")
+            self.logger.info("MISSING DEVICES (CSV):")
+            self.logger.info("hostname,faked_name,subTypeName,vendor,model,mgmtIP,site")
+            for hn, attrs, display_name in missing:
+                vendor = _normalize_vendor(attrs.get("vendor") or "Unknown")
+                model = (attrs.get("model") or "").strip()
+                sub_type = attrs.get("subTypeName", "")
+                mgmt_ip = (attrs.get("mgmtIP") or "").strip()
+                site = (attrs.get("site") or "").strip()
+                self.logger.info("%s,%s,%s,%s,%s,%s,%s",
+                                 hn, display_name, sub_type, vendor, model, mgmt_ip, site)
 
-                vendor = _normalize_vendor(raw_attrs.get("vendor") or "Unknown") or "Unknown"
-                model = (raw_attrs.get("model") or "Unknown").strip() or "Unknown"
-                driver = (raw_attrs.get("driverName") or "").strip()
+            # --- Mode 2: Update observations on existing devices ---
+            if mode in ("audit_update", "import_all"):
+                active = Status.objects.get(name="Active")
+                self.logger.info("")
+                self.logger.info("Updating observations on %d existing devices...", len(existing))
+                for hn, attrs, display_name in existing:
+                    try:
+                        device = Device.objects.filter(name=display_name).first()
+                        if device:
+                            self._update_observations(device, hn, attrs)
+                            stats["updated"] += 1
+                    except Exception as exc:
+                        self.logger.error("  Update error for %s: %s", display_name, exc)
+                        stats["errors"] += 1
 
-                if (i + 1) % 200 == 0 or i == 0:
-                    self.logger.info("  [%d/%d] %s (%s) vendor=%s model=%s",
-                                     i + 1, len(network_devices),
-                                     display_name, sub_type, vendor, model)
-
-                if dry_run:
-                    stats["created"] += 1
-                    continue
-
-                try:
-                    # Minimal Nautobot objects
-                    mfr, _ = Manufacturer.objects.get_or_create(name=vendor)
-                    dtype, _ = DeviceType.objects.get_or_create(
-                        model=model, manufacturer=mfr)
-                    role, role_created = Role.objects.get_or_create(name=sub_type)
-                    if role_created:
-                        from django.contrib.contenttypes.models import ContentType
-                        ct = ContentType.objects.get_for_model(Device)
-                        role.content_types.add(ct)
-
-                    platform = None
-                    if driver:
-                        platform, _ = Platform.objects.get_or_create(name=driver)
-
-                    # Always create new device
-                    device = None
-                    if device is None:
-                        device = Device(
-                            name=display_name,
-                            serial=display_serial,
-                            device_type=dtype,
-                            platform=platform,
-                            role=role,
-                            status=active,
-                            location=self._get_fallback_location(active),
-                        )
-                        # Write observations before first save
-                        cf = device._custom_field_data or {}
-                        obs = cf.get(OBS_CF_KEY)
-                        obs = obs if isinstance(obs, dict) else {}
-                        obs[OBS_NAMESPACE] = obs_payload
-                        obs["_sanitized"] = True
-                        cf[OBS_CF_KEY] = obs
-                        cf["system_of_record"] = "NetBrain"
-                        cf["last_synced_from_sor"] = _utc_now_iso()[:10]
-                        device._custom_field_data = cf
-                        device.validated_save()
-                        stats["created"] += 1
-                    else:
-                        pass  # should never reach here
-
-                except Exception as exc:
-                    self.logger.error("  Error on device %d: %s", i + 1, exc)
-                    stats["errors"] += 1
+            # --- Mode 4: Import all missing ---
+            if mode == "import_all":
+                active = Status.objects.get(name="Active")
+                self.logger.info("")
+                self.logger.info("Importing %d missing devices...", len(missing))
+                for i, (hn, attrs, display_name) in enumerate(missing):
+                    try:
+                        self._create_device(hn, attrs, display_name, active, stats)
+                        if (i + 1) % 100 == 0:
+                            self.logger.info("  Progress: %d/%d created", i + 1, len(missing))
+                    except Exception as exc:
+                        self.logger.error("  Error creating %s: %s", display_name, exc)
+                        stats["errors"] += 1
 
         finally:
             self._logout(host, headers)
 
+        self.logger.info("")
         self.logger.info("=" * 60)
-        self.logger.info("IMPORT COMPLETE")
+        self.logger.info("COMPLETE")
         for k, v in stats.items():
             self.logger.info("  %s: %d", k, v)
         self.logger.info("=" * 60)
         return json.dumps(stats)
+
+    # ------------------------------------------------------------------
+    # Mode 3: Import by List
+    # ------------------------------------------------------------------
+
+    def _run_import_list(self, host, username, password, client_id,
+                          client_secret, device_list, stats):
+        """Import devices from a pasted hostname list."""
+        # Parse hostnames from text (supports plain list or CSV)
+        hostnames = []
+        for line in (device_list or "").strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("hostname,"):
+                continue  # skip header
+            # Take first column if CSV
+            hn = line.split(",")[0].strip()
+            if hn:
+                hostnames.append(hn)
+
+        if not hostnames:
+            self.logger.error("No hostnames provided in device list")
+            return "FAILED: empty list"
+
+        self.logger.info("Importing %d devices from list...", len(hostnames))
+
+        token = self._login(host, username, password, client_id, client_secret)
+        if not token:
+            return "FAILED: login"
+        headers = {"Token": token, "Content-Type": "application/json"}
+
+        try:
+            self._set_domain(host, headers)
+            active = Status.objects.get(name="Active")
+
+            for i, hn in enumerate(hostnames):
+                try:
+                    time.sleep(0.1)
+                    attrs = self._get_attrs(host, headers, hn)
+                    if not attrs:
+                        self.logger.warning("  No attributes for '%s', skipping", hn)
+                        stats["errors"] += 1
+                        continue
+
+                    name = (attrs.get("name") or "").strip()
+                    display_name = _fake_hostname(name) if name else f"device-{i}"
+
+                    self._create_device(hn, attrs, display_name, active, stats)
+
+                    if (i + 1) % 50 == 0:
+                        self.logger.info("  Progress: %d/%d", i + 1, len(hostnames))
+
+                except Exception as exc:
+                    self.logger.error("  Error on '%s': %s", hn, exc)
+                    stats["errors"] += 1
+        finally:
+            self._logout(host, headers)
+
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info("LIST IMPORT COMPLETE")
+        for k, v in stats.items():
+            self.logger.info("  %s: %d", k, v)
+        self.logger.info("=" * 60)
+        return json.dumps(stats)
+
+    # ------------------------------------------------------------------
+    # Device creation
+    # ------------------------------------------------------------------
+
+    def _create_device(self, raw_hostname, raw_attrs, display_name, active_status, stats):
+        """Create a single device with minimal identity + observations."""
+        serial = (raw_attrs.get("sn") or "").strip()
+        display_serial = _fake_serial(serial) if serial else ""
+        vendor = _normalize_vendor(raw_attrs.get("vendor") or "Unknown") or "Unknown"
+        model = (raw_attrs.get("model") or "Unknown").strip() or "Unknown"
+        sub_type = (raw_attrs.get("subTypeName") or "Unknown").strip() or "Unknown"
+        driver = (raw_attrs.get("driverName") or "").strip()
+
+        # Build observation payload
+        obs_payload = {
+            "schema_version": 1,
+            "meta": {"fetched_at": _utc_now_iso(), "source": "netbrain_import_demo",
+                     "nb_hostname": raw_hostname},
+            "data": {"remote": raw_attrs},
+        }
+        obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
+            "schema_version", "source", "vendor", "model",
+            "subTypeName", "driverName", "ver", "os",
+        }))
+
+        # Create Nautobot objects
+        mfr, _ = Manufacturer.objects.get_or_create(name=vendor)
+        dtype, _ = DeviceType.objects.get_or_create(model=model, manufacturer=mfr)
+        role, rc = Role.objects.get_or_create(name=sub_type)
+        if rc:
+            from django.contrib.contenttypes.models import ContentType
+            role.content_types.add(ContentType.objects.get_for_model(Device))
+        platform = None
+        if driver:
+            platform, _ = Platform.objects.get_or_create(name=driver)
+
+        device = Device(
+            name=display_name,
+            serial=display_serial,
+            device_type=dtype,
+            platform=platform,
+            role=role,
+            status=active_status,
+            location=self._get_fallback_location(active_status),
+        )
+        cf = device._custom_field_data or {}
+        obs = cf.get(OBS_CF_KEY) or {}
+        obs[OBS_NAMESPACE] = obs_payload
+        obs["_sanitized"] = True
+        cf[OBS_CF_KEY] = obs
+        cf["system_of_record"] = "NetBrain"
+        cf["last_synced_from_sor"] = _utc_now_iso()[:10]
+        device._custom_field_data = cf
+        device.validated_save()
+        stats["created"] += 1
+
+    def _update_observations(self, device, raw_hostname, raw_attrs):
+        """Refresh observations on an existing device without recreating it."""
+        obs_payload = {
+            "schema_version": 1,
+            "meta": {"fetched_at": _utc_now_iso(), "source": "netbrain_import_demo",
+                     "nb_hostname": raw_hostname},
+            "data": {"remote": raw_attrs},
+        }
+        obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
+            "schema_version", "source", "vendor", "model",
+            "subTypeName", "driverName", "ver", "os",
+        }))
+
+        cf = device._custom_field_data or {}
+        obs = cf.get(OBS_CF_KEY) or {}
+        obs[OBS_NAMESPACE] = obs_payload
+        obs["_sanitized"] = True
+        cf[OBS_CF_KEY] = obs
+        cf["last_synced_from_sor"] = _utc_now_iso()[:10]
+        device._custom_field_data = cf
+        device.validated_save()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -267,11 +432,9 @@ class NetBrainImportDemo(Job):
         return {}
 
     def _get_fallback_location(self, active_status):
-        """Get or create Placeholder Site. Called before each device save to handle race conditions."""
         from django.contrib.contenttypes.models import ContentType
         from nautobot.dcim.models import Device, Location, LocationType
         lt, _ = LocationType.objects.get_or_create(name="Site", defaults={"nestable": False})
-        # Ensure Site LocationType allows devices
         device_ct = ContentType.objects.get_for_model(Device)
         if device_ct not in lt.content_types.all():
             lt.content_types.add(device_ct)
@@ -323,17 +486,14 @@ class NetBrainImportDemo(Job):
         except Exception as exc:
             self.logger.warning("Domain setup: %s", exc)
 
-    def _scan_inventory(self, host, headers, limit, target_types):
-        """Scan paginated inventory, collect devices matching target subTypeNames."""
+    def _scan_inventory(self, host, headers, target_types):
+        """Scan full inventory, return list of (hostname, attrs) for target device types."""
         results = []
         skip = 0
-        max_pages = 260
 
         self.logger.info("Scanning inventory for %d target types...", len(target_types))
 
-        for page in range(max_pages):
-            if len(results) >= limit:
-                break
+        for page in range(260):
             try:
                 r = requests.get(f"{host}{V1}/CMDB/Devices",
                                  params={"skip": skip, "limit": 100},
@@ -349,13 +509,10 @@ class NetBrainImportDemo(Job):
                     if st in target_types:
                         hn = d.get("name", "").strip()
                         if hn:
-                            # Fetch full attributes
                             time.sleep(0.1)
                             attrs = self._get_attrs(host, headers, hn)
                             if attrs:
                                 results.append((hn, attrs))
-                                if len(results) >= limit:
-                                    break
 
                 skip += len(batch)
                 if len(batch) < 100:
