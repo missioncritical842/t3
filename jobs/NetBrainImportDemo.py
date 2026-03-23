@@ -148,9 +148,7 @@ class NetBrainImportDemo(Job):
         try:
             self._set_domain(host, headers)
 
-            # Pre-fetch statuses and fallback location
             active = Status.objects.get(name="Active")
-            fallback_location = self._ensure_fallback_location(active)
 
             # Scan inventory for target devices
             network_devices = self._scan_inventory(host, headers, device_limit, target_types)
@@ -228,7 +226,7 @@ class NetBrainImportDemo(Job):
                             platform=platform,
                             role=role,
                             status=active,
-                            location=fallback_location,
+                            location=self._get_fallback_location(active),
                         )
                         # Write observations before first save
                         cf = device._custom_field_data or {}
@@ -284,15 +282,9 @@ class NetBrainImportDemo(Job):
             pass
         return {}
 
-    def _ensure_fallback_location(self, active_status):
-        """Get or create a placeholder location for devices (rollup assigns real location).
-        Uses Controllers location if it exists (immune to wipe), else creates Placeholder."""
+    def _get_fallback_location(self, active_status):
+        """Get or create Placeholder Site. Called before each device save to handle race conditions."""
         from nautobot.dcim.models import Location, LocationType
-        # Try to use existing Controllers location (can't be wiped)
-        controllers = Location.objects.filter(name="Controllers").first()
-        if controllers:
-            self.logger.info("Using existing 'Controllers' location as fallback")
-            return controllers
         lt, _ = LocationType.objects.get_or_create(name="Site", defaults={"nestable": False})
         loc, _ = Location.objects.get_or_create(
             name="Placeholder Site", location_type=lt,
