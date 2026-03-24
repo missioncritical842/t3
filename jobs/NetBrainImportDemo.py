@@ -247,9 +247,10 @@ class NetBrainImportDemo(Job):
                     fp = FileProxy(name=filename)
                     fp.file.save(filename, ContentFile(csv_content.encode("utf-8")))
                     fp.save()
-                    download_url = f"/api/extras/file-proxies/{fp.pk}/download/"
+                    base_url = "https://netbrain.crbg.nautobot.cloud"
+                    download_url = f"{base_url}/api/extras/file-proxies/{fp.pk}/download/"
                     self.logger.info("CSV saved: %s", filename)
-                    self.logger.info("Download: %s", download_url)
+                    self.logger.info("Download CSV: %s", download_url)
                 except Exception as exc:
                     self.logger.warning("Could not save CSV file: %s", exc)
                     self.logger.info("CSV content logged below instead:")
