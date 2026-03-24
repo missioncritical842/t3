@@ -222,40 +222,8 @@ class NetBrainImportDemo(Job):
             self.logger.info("NetBrain devices: %d total, %d missing, %d existing",
                              len(nb_devices), len(missing), len(existing))
 
-            # --- Generate CSV of missing devices and save as downloadable file ---
-            import io
-            csv_buf = io.StringIO()
-            csv_buf.write("hostname,faked_name,subTypeName,vendor,model,mgmtIP,site\n")
-            for hn, attrs, display_name in missing:
-                vendor = _normalize_vendor(attrs.get("vendor") or "Unknown")
-                model = (attrs.get("model") or "").strip().replace(",", ";")
-                sub_type = attrs.get("subTypeName", "")
-                mgmt_ip = (attrs.get("mgmtIP") or "").strip()
-                site = (attrs.get("site") or "").strip().replace(",", ";")
-                csv_buf.write(f"{hn},{display_name},{sub_type},{vendor},{model},{mgmt_ip},{site}\n")
-
-            csv_content = csv_buf.getvalue()
-            self.logger.info("Missing devices: %d (CSV generated)", len(missing))
-
-            # Save as downloadable FileProxy
-            if missing:
-                try:
-                    from django.core.files.base import ContentFile
-                    from nautobot.extras.models import FileProxy
-                    timestamp = _utc_now_iso()[:19].replace(":", "-")
-                    filename = f"netbrain_missing_devices_{timestamp}.csv"
-                    fp = FileProxy(name=filename)
-                    fp.file.save(filename, ContentFile(csv_content.encode("utf-8")))
-                    fp.save()
-                    base_url = "https://netbrain.crbg.nautobot.cloud"
-                    download_url = f"{base_url}/api/extras/file-proxies/{fp.pk}/download/"
-                    self.logger.info("CSV saved: %s", filename)
-                    self.logger.info("Download CSV: %s", download_url)
-                except Exception as exc:
-                    self.logger.warning("Could not save CSV file: %s", exc)
-                    self.logger.info("CSV content logged below instead:")
-                    for line in csv_content.strip().split("\n")[:20]:
-                        self.logger.info("  %s", line)
+            # --- Generate CSV of missing devices ---
+            self._save_missing_csv(missing)
 
             # --- Mode 2: Update observations on existing devices ---
             if mode in ("audit_update", "import_all"):
@@ -350,6 +318,19 @@ class NetBrainImportDemo(Job):
                 except Exception as exc:
                     self.logger.error("  Error on '%s': %s", hn, exc)
                     stats["errors"] += 1
+
+            # Check what's still missing and generate CSV
+            existing_names = set(Device.objects.values_list("name", flat=True))
+            still_missing = []
+            for hn in hostnames:
+                attrs = self._get_attrs(host, headers, hn)
+                if attrs:
+                    name = (attrs.get("name") or "").strip()
+                    display_name = _fake_hostname(name) if name else ""
+                    if display_name and display_name not in existing_names:
+                        still_missing.append((hn, attrs, display_name))
+            self._save_missing_csv(still_missing)
+
         finally:
             self._logout(host, headers)
 
@@ -442,6 +423,50 @@ class NetBrainImportDemo(Job):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _save_missing_csv(self, missing):
+        """Generate CSV of missing devices and save as downloadable FileProxy."""
+        if not missing:
+            self.logger.info("No missing devices — CSV not generated.")
+            return
+        import io
+        csv_buf = io.StringIO()
+        csv_buf.write("hostname,faked_name,subTypeName,vendor,model,mgmtIP,site\n")
+        for item in missing:
+            # Support both (hn, attrs, display_name) tuples and (hn, attrs) tuples
+            if len(item) == 3:
+                hn, attrs, display_name = item
+            else:
+                hn, attrs = item
+                name = (attrs.get("name") or "").strip()
+                display_name = _fake_hostname(name) if name else ""
+            vendor = _normalize_vendor(attrs.get("vendor") or "Unknown")
+            model = (attrs.get("model") or "").strip().replace(",", ";")
+            sub_type = attrs.get("subTypeName", "")
+            mgmt_ip = (attrs.get("mgmtIP") or "").strip()
+            site = (attrs.get("site") or "").strip().replace(",", ";")
+            csv_buf.write(f"{hn},{display_name},{sub_type},{vendor},{model},{mgmt_ip},{site}\n")
+
+        csv_content = csv_buf.getvalue()
+        self.logger.info("Missing devices: %d (CSV generated)", len(missing))
+
+        try:
+            from django.core.files.base import ContentFile
+            from nautobot.extras.models import FileProxy
+            timestamp = _utc_now_iso()[:19].replace(":", "-")
+            filename = f"netbrain_missing_devices_{timestamp}.csv"
+            fp = FileProxy(name=filename)
+            fp.file.save(filename, ContentFile(csv_content.encode("utf-8")))
+            fp.save()
+            base_url = "https://netbrain.crbg.nautobot.cloud"
+            download_url = f"{base_url}/api/extras/file-proxies/{fp.pk}/download/"
+            self.logger.info("CSV saved: %s", filename)
+            self.logger.info("Download CSV: %s", download_url)
+        except Exception as exc:
+            self.logger.warning("Could not save CSV file: %s", exc)
+            self.logger.info("CSV content logged below instead:")
+            for line in csv_content.strip().split("\n")[:20]:
+                self.logger.info("  %s", line)
 
     def _load_stored_creds(self):
         try:
