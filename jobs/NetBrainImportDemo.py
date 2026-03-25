@@ -309,7 +309,8 @@ class NetBrainImportDemo(Job):
 
                     device = Device.objects.filter(name=display_name).first()
                     if device:
-                        self._update_observations(device, hn, attrs)
+                        self.logger.info("  Updating: %s (%s)", display_name, attrs.get("subTypeName", ""))
+                        self._update_observations(device, hn, attrs, log_diff=True)
                         stats["updated"] += 1
                     else:
                         not_found.append((hn, attrs, display_name))
@@ -460,8 +461,16 @@ class NetBrainImportDemo(Job):
         device.validated_save()
         stats["created"] += 1
 
-    def _update_observations(self, device, raw_hostname, raw_attrs):
+    def _update_observations(self, device, raw_hostname, raw_attrs, log_diff=False):
         """Refresh observations on an existing device without recreating it."""
+        # Capture old remote data for diff
+        old_remote = {}
+        if log_diff:
+            cf_old = device._custom_field_data or {}
+            obs_old = cf_old.get(OBS_CF_KEY) or {}
+            nb_old = obs_old.get(OBS_NAMESPACE) or {}
+            old_remote = nb_old.get("data", {}).get("remote", {})
+
         obs_payload = {
             "schema_version": 1,
             "meta": {"fetched_at": _utc_now_iso(), "source": "netbrain_import_demo",
@@ -472,6 +481,24 @@ class NetBrainImportDemo(Job):
             "schema_version", "source", "vendor", "model",
             "subTypeName", "driverName", "ver", "os",
         }))
+
+        # Log field changes
+        if log_diff and old_remote:
+            new_remote = obs_payload.get("data", {}).get("remote", {})
+            added = set(new_remote.keys()) - set(old_remote.keys())
+            removed = set(old_remote.keys()) - set(new_remote.keys())
+            changed = []
+            for k in set(new_remote.keys()) & set(old_remote.keys()):
+                if str(new_remote.get(k)) != str(old_remote.get(k)):
+                    changed.append(k)
+            if added:
+                self.logger.info("    + Added fields: %s", sorted(added))
+            if removed:
+                self.logger.info("    - Removed fields: %s", sorted(removed))
+            if changed:
+                self.logger.info("    ~ Changed fields: %s", sorted(changed))
+            if not added and not removed and not changed:
+                self.logger.info("    (no changes)")
 
         cf = device._custom_field_data or {}
         obs = cf.get(OBS_CF_KEY) or {}
