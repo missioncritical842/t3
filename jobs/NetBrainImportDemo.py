@@ -75,6 +75,7 @@ MODE_CHOICES = [
     ("audit_update", "2) Audit + Update — log missing, refresh observations on existing"),
     ("import_list", "3) Import by List — paste hostnames to import"),
     ("import_all", "4) Import All Missing — requires confirmation"),
+    ("update_list", "5) Update Observations by List — refresh data for pasted hostnames"),
 ]
 
 VENDOR_MAP = {
@@ -183,9 +184,14 @@ class NetBrainImportDemo(Job):
         stats = {"fetched": 0, "missing": 0, "existing": 0,
                  "created": 0, "updated": 0, "errors": 0}
 
-        # --- Mode 3: Import by List (no full scan needed) ---
+        # --- Mode 3: Import by List ---
         if mode == "import_list":
             return self._run_import_list(host, username, password, client_id,
+                                          client_secret, device_list, stats)
+
+        # --- Mode 5: Update Observations by List ---
+        if mode == "update_list":
+            return self._run_update_list(host, username, password, client_id,
                                           client_secret, device_list, stats)
 
         # --- Modes 1, 2, 4: need full inventory scan ---
@@ -266,23 +272,79 @@ class NetBrainImportDemo(Job):
         return json.dumps(stats)
 
     # ------------------------------------------------------------------
+    # Mode 5: Update Observations by List
+    # ------------------------------------------------------------------
+
+    def _run_update_list(self, host, username, password, client_id,
+                          client_secret, device_list, stats):
+        """Update observations on existing devices from a pasted hostname list."""
+        hostnames = self._parse_device_list(device_list)
+        if not hostnames:
+            self.logger.error("No hostnames provided in device list")
+            return "FAILED: empty list"
+
+        self.logger.info("Updating observations for %d devices from list...", len(hostnames))
+
+        token = self._login(host, username, password, client_id, client_secret)
+        if not token:
+            return "FAILED: login"
+        headers = {"Token": token, "Content-Type": "application/json"}
+
+        try:
+            self._set_domain(host, headers)
+            existing_names = set(Device.objects.values_list("name", flat=True))
+            not_found = []
+
+            for i, hn in enumerate(hostnames):
+                try:
+                    time.sleep(0.1)
+                    attrs = self._get_attrs(host, headers, hn)
+                    if not attrs:
+                        self.logger.warning("  No attributes for '%s', skipping", hn)
+                        stats["errors"] += 1
+                        continue
+
+                    name = (attrs.get("name") or "").strip()
+                    display_name = _fake_hostname(name) if name else ""
+
+                    device = Device.objects.filter(name=display_name).first()
+                    if device:
+                        self._update_observations(device, hn, attrs)
+                        stats["updated"] += 1
+                    else:
+                        not_found.append((hn, attrs, display_name))
+                        self.logger.info("  Device '%s' not in Nautobot, skipping update", display_name)
+
+                    if (i + 1) % 50 == 0:
+                        self.logger.info("  Progress: %d/%d", i + 1, len(hostnames))
+
+                except Exception as exc:
+                    self.logger.error("  Error on '%s': %s", hn, exc)
+                    stats["errors"] += 1
+
+            # Generate CSV for devices not found in Nautobot
+            stats["missing"] = len(not_found)
+            self._save_missing_csv(not_found)
+
+        finally:
+            self._logout(host, headers)
+
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info("LIST UPDATE COMPLETE")
+        for k, v in stats.items():
+            self.logger.info("  %s: %d", k, v)
+        self.logger.info("=" * 60)
+        return json.dumps(stats)
+
+    # ------------------------------------------------------------------
     # Mode 3: Import by List
     # ------------------------------------------------------------------
 
     def _run_import_list(self, host, username, password, client_id,
                           client_secret, device_list, stats):
         """Import devices from a pasted hostname list."""
-        # Parse hostnames from text (supports plain list or CSV)
-        hostnames = []
-        for line in (device_list or "").strip().splitlines():
-            line = line.strip()
-            if not line or line.startswith("hostname,"):
-                continue  # skip header
-            # Take first column if CSV
-            hn = line.split(",")[0].strip()
-            if hn:
-                hostnames.append(hn)
-
+        hostnames = self._parse_device_list(device_list)
         if not hostnames:
             self.logger.error("No hostnames provided in device list")
             return "FAILED: empty list"
@@ -423,6 +485,18 @@ class NetBrainImportDemo(Job):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _parse_device_list(self, device_list):
+        """Parse hostnames from text input. Supports plain list or CSV (hostname is first column)."""
+        hostnames = []
+        for line in (device_list or "").strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("hostname,"):
+                continue
+            hn = line.split(",")[0].strip()
+            if hn:
+                hostnames.append(hn)
+        return hostnames
 
     def _save_missing_csv(self, missing):
         """Generate CSV of missing devices and save as downloadable FileProxy."""
