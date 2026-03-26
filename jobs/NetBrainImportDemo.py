@@ -1,10 +1,11 @@
 """NetBrain -> Nautobot Import (Minimal Identity + Observations).
 
-Four modes:
-  1) Audit Only    — scan NetBrain, log missing devices as CSV, no writes
-  2) Audit + Update — same scan, also refresh observations on existing devices
-  3) Import by List — paste hostnames from a previous audit, import those
-  4) Import All     — import every missing device (requires confirmation)
+Five modes:
+  1) Audit Only       — scan NetBrain, log missing devices as CSV, no writes
+  2) Audit + Update   — same scan, also refresh observations on existing devices
+  3) Import by List   — paste hostnames from a previous audit, import those
+  4) Import All       — import every missing device (requires confirmation)
+  5) Update Obs List  — paste hostnames, refresh observation data on existing devices
 
 Follows Joshua's pattern: raw vendor facts stored in observations["netbrain"].
 NAUTOBOT_FAKER is hardcoded ON to protect sensitive data.
