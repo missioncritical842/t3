@@ -7,8 +7,11 @@ Five modes:
   4) Import All       — import every missing device (requires confirmation)
   5) Update Obs List  — paste hostnames, refresh observation data on existing devices
 
-Follows Joshua's pattern: raw vendor facts stored in observations["netbrain"].
-NAUTOBOT_FAKER is hardcoded ON to protect sensitive data.
+Matches NetBrain devices to existing Nautobot devices by hostname (primary)
+or serial number (fallback). Adds observations["netbrain"] alongside existing
+observations from other sources (netdata_chassis, netdata_device_inventory, etc.).
+
+Faker controlled by NAUTOBOT_FAKER env var.
 """
 
 from __future__ import annotations
@@ -162,8 +165,8 @@ class NetBrainImportDemo(Job):
         client_id = (client_id or "").strip() or os.environ.get("NETBRAIN_CLIENT_ID", "") or stored.get("client_id", "")
         client_secret = (client_secret or "").strip() or os.environ.get("NETBRAIN_CLIENT_SECRET", "") or stored.get("client_secret", "")
 
-        # Faker always on
-        faker_on = True
+        # Faker controlled by NAUTOBOT_FAKER env var
+        faker_on = _sanitize_enabled()
 
         # Safety check for import modes
         if mode in ("import_list", "import_all"):
@@ -178,7 +181,7 @@ class NetBrainImportDemo(Job):
         self.logger.info("=" * 60)
         self.logger.info("NetBrain Import Demo")
         self.logger.info("  mode: %s", mode)
-        self.logger.info("  faker: ALWAYS ON")
+        self.logger.info("  faker: %s", "ON" if faker_on else "OFF")
         self.logger.info("  include_waps: %s", include_waps)
         self.logger.info("=" * 60)
 
@@ -204,8 +207,9 @@ class NetBrainImportDemo(Job):
         try:
             self._set_domain(host, headers)
 
-            # Get existing device names in Nautobot
+            # Get existing devices in Nautobot (by name and serial for matching)
             existing_names = set(Device.objects.values_list("name", flat=True))
+            existing_serials = {s for s in Device.objects.values_list("serial", flat=True) if s}
             self.logger.info("Existing devices in Nautobot: %d", len(existing_names))
 
             # Scan NetBrain inventory
@@ -213,15 +217,30 @@ class NetBrainImportDemo(Job):
             stats["fetched"] = len(nb_devices)
 
             # Classify each as missing or existing
+            # Match by hostname first, then serial fallback
             missing = []
             existing = []
             for hn, attrs in nb_devices:
                 name = (attrs.get("name") or "").strip()
-                display_name = _fake_hostname(name) if name else ""
-                if display_name in existing_names:
-                    existing.append((hn, attrs, display_name))
+                serial = (attrs.get("sn") or "").strip()
+                display_name = _fake_hostname(name) if (name and faker_on) else name
+                display_serial = _fake_serial(serial) if (serial and faker_on) else serial
+
+                # Try matching by name, then by serial
+                matched_device = None
+                if name and name in existing_names:
+                    matched_device = name
+                elif display_name and display_name in existing_names:
+                    matched_device = display_name
+                elif serial and serial in existing_serials:
+                    matched_device = f"serial:{serial}"
+                elif display_serial and display_serial in existing_serials:
+                    matched_device = f"serial:{display_serial}"
+
+                if matched_device:
+                    existing.append((hn, attrs, matched_device))
                 else:
-                    missing.append((hn, attrs, display_name))
+                    missing.append((hn, attrs, display_name or name))
 
             stats["missing"] = len(missing)
             stats["existing"] = len(existing)
@@ -237,14 +256,16 @@ class NetBrainImportDemo(Job):
                 active = Status.objects.get(name="Active")
                 self.logger.info("")
                 self.logger.info("Updating observations on %d existing devices...", len(existing))
-                for hn, attrs, display_name in existing:
+                for hn, attrs, match_key in existing:
                     try:
-                        device = Device.objects.filter(name=display_name).first()
+                        device = self._find_device(match_key)
                         if device:
                             self._update_observations(device, hn, attrs)
                             stats["updated"] += 1
+                        else:
+                            self.logger.warning("  Could not find device for %s", match_key)
                     except Exception as exc:
-                        self.logger.error("  Update error for %s: %s", display_name, exc)
+                        self.logger.error("  Update error for %s: %s", match_key, exc)
                         stats["errors"] += 1
 
             # --- Mode 4: Import all missing ---
@@ -306,16 +327,24 @@ class NetBrainImportDemo(Job):
                         continue
 
                     name = (attrs.get("name") or "").strip()
-                    display_name = _fake_hostname(name) if name else ""
+                    serial = (attrs.get("sn") or "").strip()
+                    faker_on = _sanitize_enabled()
+                    display_name = _fake_hostname(name) if (name and faker_on) else name
 
-                    device = Device.objects.filter(name=display_name).first()
+                    # Match by real name, faked name, or serial
+                    device = Device.objects.filter(name=name).first() if name else None
+                    if not device and display_name and display_name != name:
+                        device = Device.objects.filter(name=display_name).first()
+                    if not device and serial:
+                        device = Device.objects.filter(serial=serial).first()
+
                     if device:
-                        self.logger.info("  Updating: %s (%s)", display_name, attrs.get("subTypeName", ""))
+                        self.logger.info("  Updating: %s (%s)", device.name, attrs.get("subTypeName", ""))
                         self._update_observations(device, hn, attrs, log_diff=True)
                         stats["updated"] += 1
                     else:
-                        not_found.append((hn, attrs, display_name))
-                        self.logger.info("  Device '%s' not in Nautobot, skipping update", display_name)
+                        not_found.append((hn, attrs, display_name or name))
+                        self.logger.info("  Device '%s' not in Nautobot, skipping update", name)
 
                     if (i + 1) % 50 == 0:
                         self.logger.info("  Progress: %d/%d", i + 1, len(hostnames))
@@ -412,8 +441,9 @@ class NetBrainImportDemo(Job):
 
     def _create_device(self, raw_hostname, raw_attrs, display_name, active_status, stats):
         """Create a single device with minimal identity + observations."""
+        faker_on = _sanitize_enabled()
         serial = (raw_attrs.get("sn") or "").strip()
-        display_serial = _fake_serial(serial) if serial else ""
+        display_serial = _fake_serial(serial) if (serial and faker_on) else serial
         vendor = _normalize_vendor(raw_attrs.get("vendor") or "Unknown") or "Unknown"
         model = (raw_attrs.get("model") or "Unknown").strip() or "Unknown"
         sub_type = (raw_attrs.get("subTypeName") or "Unknown").strip() or "Unknown"
@@ -426,10 +456,11 @@ class NetBrainImportDemo(Job):
                      "nb_hostname": raw_hostname},
             "data": {"remote": raw_attrs},
         }
-        obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
-            "schema_version", "source", "vendor", "model",
-            "subTypeName", "driverName", "ver", "os",
-        }))
+        if _sanitize_enabled():
+            obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
+                "schema_version", "source", "vendor", "model",
+                "subTypeName", "driverName", "ver", "os",
+            }))
 
         # Create Nautobot objects
         mfr, _ = Manufacturer.objects.get_or_create(name=vendor)
@@ -478,10 +509,11 @@ class NetBrainImportDemo(Job):
                      "nb_hostname": raw_hostname},
             "data": {"remote": raw_attrs},
         }
-        obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
-            "schema_version", "source", "vendor", "model",
-            "subTypeName", "driverName", "ver", "os",
-        }))
+        if _sanitize_enabled():
+            obs_payload = _sanitize_json_tree(obs_payload, skip_keys=frozenset({
+                "schema_version", "source", "vendor", "model",
+                "subTypeName", "driverName", "ver", "os",
+            }))
 
         # Log field changes
         if log_diff and old_remote:
@@ -513,6 +545,13 @@ class NetBrainImportDemo(Job):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _find_device(self, match_key):
+        """Find a device by name or serial match key."""
+        if match_key.startswith("serial:"):
+            serial = match_key[7:]
+            return Device.objects.filter(serial=serial).first()
+        return Device.objects.filter(name=match_key).first()
 
     def _parse_device_list(self, device_list):
         """Parse hostnames from text input. Supports plain list or CSV (hostname is first column)."""
