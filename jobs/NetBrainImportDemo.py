@@ -245,8 +245,23 @@ class NetBrainImportDemo(Job):
             stats["missing"] = len(missing)
             stats["existing"] = len(existing)
 
-            self.logger.info("NetBrain devices: %d total, %d missing, %d existing",
+            # Count how many existing devices already have netbrain observations vs need update
+            needs_obs_update = 0
+            has_obs_already = 0
+            for hn, attrs, match_key in existing:
+                device = self._find_device(match_key)
+                if device:
+                    cf = device._custom_field_data or {}
+                    obs = cf.get(OBS_CF_KEY) or {}
+                    if OBS_NAMESPACE in obs:
+                        has_obs_already += 1
+                    else:
+                        needs_obs_update += 1
+
+            self.logger.info("NetBrain devices: %d total, %d missing from Nautobot, %d matched existing",
                              len(nb_devices), len(missing), len(existing))
+            self.logger.info("  Existing breakdown: %d need NetBrain observations, %d already have them",
+                             needs_obs_update, has_obs_already)
 
             # --- Generate CSV of missing devices ---
             self._save_missing_csv(missing)
