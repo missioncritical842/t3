@@ -418,6 +418,25 @@ The 4th tab is vendor-specific:
 - **Meraki tab** — Meraki Dashboard data (WAN IPs, MAC, firmware, network ID, license)
 - **HPNA tab** — HP Network Automation data (config management, script execution)
 
+**HPNA tab fields** (only on non-Meraki devices):
+
+| Field | Example | What it tells you |
+|---|---|---|
+| HPNA Support | yes | Can HPNA manage this device? |
+| Access Type | good | HPNA reachability (good/failed/unknown) |
+| Software Version | 17.09.05a | **Live software version** from HPNA — authoritative for Cisco/Arista |
+| HPNA Access | ICMP 1, SSH 1, TELNET 0, SNMP 1.3.6.1.4.1.9.1.1707 | Protocol reachability: ping yes, SSH yes, Telnet no, SNMP OID |
+| Twin IP | 10.184.182.2 | **HA pair** — the redundant peer's IP |
+| Twin Primary | Yes | This device is the primary in the HA pair |
+| Twin Hostname | rwanus0733-01a-002 | HA peer's hostname |
+| Management Interface | Sdwan-system-vtf | Which interface HPNA manages through |
+| Location Id | 1000733 | Crest ID |
+
+The HPNA tab provides **live software version, HA pair information, and access verification** — data that neither NetBrain nor the CMDB has. This is especially valuable for:
+- Software compliance tracking (exact running version)
+- HA pair mapping (which devices are redundant peers)
+- Reachability validation (can we SSH/SNMP to this device?)
+
 Other differences for the Cisco ISR4451 router vs the Meraki WAP:
 - Device Family: **Cisco IOS** (empty on Meraki)
 - Device Type: **Router** (empty on Meraki)
@@ -449,6 +468,23 @@ The Resources menu provides access to contact and scheduling data:
 | **UCCC On Duty Schedule** | UCCC duty rotation schedule | *(no CSV import yet)* |
 
 The contact lists are imported into Nautobot as Contact objects. The **schedules** (on-call rotations, duty schedules) don't have CSV imports yet — this is operational scheduling data that could be valuable for incident response workflows.
+
+---
+
+## Connected Systems (Quick Links)
+
+NetData links directly to all integrated external systems:
+
+| Quick Link | What it is |
+|---|---|
+| **BlueCat (Eric Dittman) - PROD** | BlueCat IPAM — source of all 5,373 subnets in Subnet Inventory |
+| **HPNA - UAT** | HP Network Automation test instance |
+| **HPNA - PROD** | HP Network Automation production — config management, script execution, compliance |
+| **NetDATA - DEV** | NetData development environment |
+| **NetDATA - PROD** | NetData production environment |
+| **ServiceNow** | ServiceNow CMDB — bidirectional device sync |
+
+NetData also has **Help** resources: page-level help, SOP documents, bug/feedback submission, and release notes.
 
 ---
 
@@ -526,6 +562,9 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd19 | Resources menu | Network On Call Contacts/Schedule, UCCC Contacts/On Duty Schedule | ✅ Documented |
 | nd20 | Chassis Inventory | 818 items: hostname, serial, vendor, model, category, purchase date, EOL/EOS/EOS dates, SW version/status/recommendation | ✅ Documented |
 | nd21 | Network Exceptions report | ~1,000+ HPNA policy violations and compliance exceptions by device | ✅ Documented |
+| nd22 | HPNA tab (Cisco ISR4451) | Live software version, HA pair info (twin IP/hostname), HPNA access verification, SNMP OID | ✅ Documented |
+| nd23 | Help menu | Page Help, SOP Document, Bug/Feedback, Release Notes, Sign out | ✅ Documented |
+| nd24 | Quick Links menu | BlueCat PROD, HPNA UAT+PROD, NetDATA DEV+PROD, ServiceNow | ✅ Documented |
 
 ## Screenshots Still Needed
 
@@ -536,7 +575,11 @@ These would help complete the documentation and plan future Nautobot imports:
 3. ~~**Subnet Inventory**~~ ✅ nd16
 4. ~~**BGP Inventory**~~ ✅ nd15
 5. ~~**Site Inventory**~~ ✅ nd17
-6. ~~**Chassis Inventory view**~~ ✅ nd20 (818 items with full lifecycle + software status)
-7. ~~**A Reports page**~~ ✅ nd21 (Network Exceptions — HPNA policy violations)
+6. ~~**Chassis Inventory view**~~ ✅ nd20
+7. ~~**A Reports page**~~ ✅ nd21
 8. ~~**Resources menu**~~ ✅ nd19
-9. ~~**A non-Meraki device detail**~~ ✅ nd18 (Cisco ISR4451 — has HPNA tab instead of Meraki)
+9. ~~**Non-Meraki device detail**~~ ✅ nd18 + nd22 (HPNA tab)
+10. ~~**Help menu**~~ ✅ nd23
+11. ~~**Quick Links**~~ ✅ nd24
+
+**All major NetData views have been documented.** 24 screenshots covering every inventory, every device tab, every menu, and reports.
