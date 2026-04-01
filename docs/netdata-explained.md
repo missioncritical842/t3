@@ -174,6 +174,70 @@ The Circuit Inventory shows 91 WAN circuits with these columns:
 
 ---
 
+## BGP Inventory View
+
+21 BGP entries tracking autonomous system numbers and their device assignments:
+
+| Column | What it shows | Nautobot mapping |
+|---|---|---|
+| **Number** | ASN (e.g., 22499, 12076) | BGPRoutingInstance.autonomous_system |
+| **Type** | public or private | ASN type |
+| **Use** | in use, reserved, etc. | Status |
+| **Device** | Hostname assigned to this ASN | Device |
+| **Site** | Crest ID (datacenter sites: 1003369, 1003371, 1003389, 1003390) | Location |
+| **Info** | Additional notes | Description |
+| **Last Seen** | Last verification date (April 2026 — actively refreshed) | Last synced |
+| **Expires At** | Expiration date if applicable | Lifecycle |
+
+All BGP entries are at **datacenter sites** (AM5, AM6, EMEA datacenters). Devices are routers: `rdcausamr5`, `rb2busamr6`, `rwhebusamr6`, etc.
+
+---
+
+## Subnet Inventory View
+
+**5,373 subnets** — by far the largest inventory in NetData. IP address plan sourced from **BlueCat** IPAM.
+
+| Column | What it shows | Nautobot mapping |
+|---|---|---|
+| **Valid** | Red X = summary/parent block (skip), Green check = actual subnet (import) | Filter — only import Valid=TRUE |
+| **Network IP** | Subnet in CIDR (e.g., 10.194.64.0/18, 10.103.0.0/18) | Prefix.prefix |
+| **Floor** | Building floor number | Location metadata |
+| **Zone Name** | All "Internal" (also "DMZ 1" in other data) | Namespace (Internal / DMZ 1) |
+| **Usage Type** | block, block/Wireless, block/VPN, block/waan, block/server, block/security | Prefix.role or tag |
+| **Sources** | All "bluecat" — sourced from BlueCat IPAM | Data lineage |
+| **Location ID** | Crest ID linking to site | Prefix → Location |
+| **UDF** | User-defined fields | Custom fields |
+
+Usage Type breakdown tells you **what the subnet is for**: wireless networks, VPN pools, WAN links, server farms, security zones, etc.
+
+---
+
+## Site Inventory View
+
+**105 sites** — the master list of all Corebridge facilities. Last updated 9/18/2023.
+
+| Column | What it shows | Nautobot mapping |
+|---|---|---|
+| **Location ID** | Crest ID (primary key) | Location.facility |
+| **CBRE_myData_PropertyId** | MyData property link | Location custom field |
+| **Region** | AMER-E, AMER-W, EMEA | Location (Region level) |
+| **Country / State / City** | Geographic hierarchy | Location hierarchy |
+| **Address** | Street address | Location.physical_address |
+| **Postal Code** | ZIP code | Location.physical_address |
+| **Building Status** | Active, Vacant | Location.status |
+| **Headcount / Capacity** | Current vs max occupancy | Location custom fields |
+| **HRC Status** | Non-HRC (High Risk Country flag) | Location tag/custom field |
+| **Site Category** | BT 2018, BT 2.0, Vacant, Thick Branch | Location tag |
+| **Support Maintenance** | Maintenance contract reference | Location custom field |
+
+**Site Categories** are deployment tiers — they define the standard network design for that site:
+- **BT 2018** — older branch technology standard
+- **BT 2.0** — current branch technology standard
+- **Thick Branch** — larger branch with more infrastructure
+- **Vacant** — empty/unused site
+
+---
+
 ## Reports Menu
 
 | Report | What it provides | CSV mapping |
@@ -390,16 +454,20 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd12 | Device detail — Meraki tab | Meraki Dashboard data: WAN IPs, serial, MAC, lat/lng, address, LAN IP, network ID, model, claimed at | ✅ Documented |
 | nd13 | Device detail — Exceptions tab | ServiceNow sync failures: 4 exceptions showing failed CMDB field updates with timestamps | ✅ Documented |
 | nd14 | Device detail — Device Events tab | Full audit log (153 events): sync attempts, SNOW updates, duplicate CI detection, created by/timestamps | ✅ Documented |
+| nd15 | BGP Inventory | 21 BGP entries: ASN, type (public), device, site, last seen, expires at | ✅ Documented |
+| nd16 | Subnet Inventory | 5,373 subnets: Valid flag, Network IP, Zone (Internal), Usage Type, Source (bluecat), Location ID | ✅ Documented |
+| nd17 | Site Inventory | 105 sites: Crest ID, MyData PropertyId, Region, Address, Building Status, Capacity, HRC Status, Site Category | ✅ Documented |
 
 ## Screenshots Still Needed
 
 These would help complete the documentation and plan future Nautobot imports:
 
-1. ~~**Device detail — all tabs**~~ ✅ Captured in nd8-nd14
-2. ~~**Circuit Inventory view**~~ ✅ Captured in nd9
-3. **Subnet Inventory view** — how subnets/prefixes are displayed with zones
-4. **BGP Inventory view** — BGP peering table with ASNs and peer IPs
-5. **Chassis Inventory view** — hardware purchase records with serials and dates
-6. **Site Inventory list view** — the full site list (not a single site detail)
+1. ~~**Device detail — all tabs**~~ ✅ nd8-nd14
+2. ~~**Circuit Inventory**~~ ✅ nd9
+3. ~~**Subnet Inventory**~~ ✅ nd16
+4. ~~**BGP Inventory**~~ ✅ nd15
+5. ~~**Site Inventory**~~ ✅ nd17
+6. **Chassis Inventory view** — hardware purchase records with serials and dates
 7. **A Reports page** (e.g., Netops OS Upgrade or Network Exceptions) — to understand report format
 8. **Resources menu** — haven't seen what's in this dropdown yet
+9. **A non-Meraki device detail** (Cisco/Arista) — to see if different tabs appear
