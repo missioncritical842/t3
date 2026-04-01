@@ -30,11 +30,11 @@ The NetData UI has three main navigation sections:
 
 | Menu | Purpose |
 |---|---|
-| **Inventories** | All network data views (devices, circuits, subnets, etc.) |
-| **Reports** | Reporting and analytics |
-| **Tools** | Utilities and management tools |
+| **Inventories** | All network data views (devices, circuits, subnets, etc.) — 13 inventory types |
+| **Reports** | Tacacs Accounting, Site Upgrade Info, Netops OS Upgrade, Network Exceptions, Network Events, Metrics, Cisco MS Teams Ext DID Mappings |
+| **Tools** | HPNA Script Runner (run scripts on devices via HP Network Automation), Network Path Trace |
 
-Additionally: **Resources**, **Help**, **Quick Links** in the top bar.
+Additionally: **Resources**, **Help**, **Quick Links** in the top bar. Export buttons (Excel and CSV download) are available on inventory list views.
 
 ### Home Page
 
@@ -72,6 +72,104 @@ The **Inventories** dropdown is the heart of NetData. Each menu item is a full i
 | `netdata_cisco-ms-teams-ext-did-mappings` | Exported separately | ~33,351 | Microsoft Teams / phone DID number mappings |
 | `netdata_netops-os-upgrade` | Exported separately | ~2,871 | OS upgrade tracking — device IP, model, upgrade status |
 | `netdata_model-eol` | Exported separately | varies | Hardware end-of-life dates by vendor/model |
+
+---
+
+## Device Inventory View
+
+The Device Inventory list shows all 1,111 devices in a sortable, filterable table with these columns:
+
+| Column | What it shows |
+|---|---|
+| **Site** | Crest ID (links to the site detail page) |
+| **Host Name** | Device hostname (links to device detail) |
+| **Management IP** | Primary management IP |
+| **Vendor** | Manufacturer |
+| **Model** | Hardware model |
+| **Category** | Device category (switch, wireless, router, firewall, etc.) |
+| **Status** | Active, Inactive, Retired |
+| **Is External** | Whether device is externally managed |
+| **Confirmed** | Physical inventory verification |
+| **HPNA** | Checkbox — is this device in HP Network Automation? |
+| **Spectrum** | Checkbox — is this device monitored by CA Spectrum? |
+| **Prime** | Checkbox — is this device in Cisco Prime? |
+| **SNOW** | Checkbox — is this device in ServiceNow CMDB? |
+| **Meraki** | Checkbox — is this a Meraki-managed device? |
+
+The boolean columns (HPNA, Spectrum, Prime, SNOW, Meraki) are a quick way to see **which external systems know about each device** — useful for finding gaps between systems.
+
+---
+
+## Site Detail Page
+
+Clicking a Crest ID opens the **site-centric view** — everything about one physical location:
+
+**Header:** Shows site name, Crest ID, and a summary bar:
+- Non-Network Devices count
+- Network Devices count
+- Subnet Count
+- Circuit Count
+
+**Tabs:**
+| Tab | What it shows |
+|---|---|
+| **Site Details** | Address, capacity, headcount, primary usage, embedded Google Map with pin |
+| **Location** | Detailed geographic/facility information |
+| **Ports** | Port connections at this site |
+| **Network Devices** | All devices at this site |
+| **Subnets** | IP subnets assigned to this site |
+| **Circuits** | WAN circuits terminating at this site |
+| **Documents** | Attached files and documentation |
+
+Example: Crest 1000278 = Chicago, 500 West Madison Street, Suite 2850. Office with capacity 44, headcount 23, 7 network devices, 36 subnets, 2 circuits.
+
+---
+
+## Port Connection Inventory
+
+The Port Connection Inventory tracks **what's plugged into each switch port** — endpoint-to-switchport mapping:
+
+| Column | What it shows |
+|---|---|
+| **MAC Address** | Endpoint's MAC address |
+| **IP Address** | Endpoint's IP |
+| **Host Name** | Endpoint hostname |
+| **Port Name** | Switch port (e.g., GigabitEthernet1/0/24) |
+| **Port Description** | Interface description configured on the switch |
+| **Vendor** | Switch vendor |
+| **Fingerprint** | Device fingerprint/classification |
+| **User Name** | Authenticated user (802.1X) |
+| **DHCP** | DHCP enabled flag |
+| **DHCP Subnet** | Which DHCP scope served this endpoint |
+| **Switch/WAP** | Which switch or AP the endpoint connects to |
+| **Negotiated Speed** | Link speed |
+| **Negotiated Duplex** | Half/full duplex |
+| **Configured...** | (additional configuration columns) |
+
+This data would map to **Cable** objects and **Interface** connections in Nautobot. Currently no CSV import exists for this.
+
+---
+
+## Reports Menu
+
+| Report | What it provides | CSV mapping |
+|---|---|---|
+| **Tacacs Accounting** | TACACS+ authentication/authorization logs | *(no CSV)* |
+| **Site Upgrade Info** | Site-level upgrade status and planning | Related to `netdata_site-planning` |
+| **Netops OS Upgrade** | Device OS upgrade tracking | `netdata_netops-os-upgrade` CSV |
+| **Network Exceptions** | Devices/configs that deviate from standards | *(no CSV)* |
+| **Network Events** | Network events and incidents | *(no CSV)* |
+| **Metrics** | Performance and operational metrics | *(no CSV)* |
+| **Cisco MS Teams Ext DID Mappings** | Phone extension/DID number mappings | `netdata_cisco-ms-teams-ext-did-mappings` CSV |
+
+---
+
+## Tools Menu
+
+| Tool | What it does |
+|---|---|
+| **HPNA Script Runner** | Execute scripts on network devices via HP Network Automation (HPNA). Cloud instance at `https://hpnaprod.crbgf.net` |
+| **Network Path Trace** | Trace network paths between two endpoints. Similar to NetBrain's path calculation |
 
 ---
 
