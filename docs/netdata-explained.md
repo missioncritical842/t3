@@ -377,6 +377,28 @@ A full **audit log** of everything that's happened to this device in NetData. Sh
 
 This audit trail shows the **full history of data synchronization** between NetData and external systems.
 
+### Tabs Vary by Device Type
+
+The device detail tabs change depending on the vendor/management system:
+
+| Device Type | Tabs |
+|---|---|
+| **Meraki devices** (APs, switches, firewalls) | Device Details, Location, ServiceNow, **Meraki**, Exceptions, Device Events |
+| **Cisco/traditional devices** (routers, switches) | Device Details, Location, ServiceNow, **HPNA**, Exceptions, Device Events |
+
+The 4th tab is vendor-specific:
+- **Meraki tab** — Meraki Dashboard data (WAN IPs, MAC, firmware, network ID, license)
+- **HPNA tab** — HP Network Automation data (config management, script execution)
+
+Other differences for the Cisco ISR4451 router vs the Meraki WAP:
+- Device Family: **Cisco IOS** (empty on Meraki)
+- Device Type: **Router** (empty on Meraki)
+- Sys Class Name: **cmdb_ci_ip_router** (vs cmdb_ci_netgear)
+- Monitoring Type: **Full** (vs Out-of-Scope)
+- Network Flags: **smanage** (vs empty)
+- Status: **Installed** (vs Active)
+- Confirmed: **false** (vs true)
+
 ### Lifecycle, Circuits, and Site Planning Data
 
 These data categories from Joshua's documentation are accessed at the **site level** (Site Inventory → click a Crest ID), not the device level:
@@ -384,6 +406,21 @@ These data categories from Joshua's documentation are accessed at the **site lev
 - **Lifecycle Management** (EOL dates, software versions) — comes from `netdata_model-eol` and `netdata_netops-os-upgrade` CSVs
 - **Circuits / Realty Data** — visible on the site detail page Circuits tab (nd4) and Circuit Inventory (nd9)
 - **Site Planning** (device counts, deployment programs) — visible on the site detail page and `netdata_site-planning` CSV
+
+---
+
+## Resources Menu
+
+The Resources menu provides access to contact and scheduling data:
+
+| Item | What it provides | CSV mapping |
+|---|---|---|
+| **Network On Call Contacts** | Network operations on-call contact list | `netdata_network-on-call-contact` |
+| **Network On Call Schedule** | On-call rotation schedule | *(no CSV import yet)* |
+| **UCCC Contacts** | Unified Communications contact center team | `netdata_uccc-contact` |
+| **UCCC On Duty Schedule** | UCCC duty rotation schedule | *(no CSV import yet)* |
+
+The contact lists are imported into Nautobot as Contact objects. The **schedules** (on-call rotations, duty schedules) don't have CSV imports yet — this is operational scheduling data that could be valuable for incident response workflows.
 
 ---
 
@@ -457,6 +494,8 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd15 | BGP Inventory | 21 BGP entries: ASN, type (public), device, site, last seen, expires at | ✅ Documented |
 | nd16 | Subnet Inventory | 5,373 subnets: Valid flag, Network IP, Zone (Internal), Usage Type, Source (bluecat), Location ID | ✅ Documented |
 | nd17 | Site Inventory | 105 sites: Crest ID, MyData PropertyId, Region, Address, Building Status, Capacity, HRC Status, Site Category | ✅ Documented |
+| nd18 | Non-Meraki device detail (Cisco ISR4451) | Different tabs: HPNA instead of Meraki. Cisco IOS family, cmdb_ci_ip_router, Full monitoring | ✅ Documented |
+| nd19 | Resources menu | Network On Call Contacts/Schedule, UCCC Contacts/On Duty Schedule | ✅ Documented |
 
 ## Screenshots Still Needed
 
@@ -469,5 +508,5 @@ These would help complete the documentation and plan future Nautobot imports:
 5. ~~**Site Inventory**~~ ✅ nd17
 6. **Chassis Inventory view** — hardware purchase records with serials and dates
 7. **A Reports page** (e.g., Netops OS Upgrade or Network Exceptions) — to understand report format
-8. **Resources menu** — haven't seen what's in this dropdown yet
-9. **A non-Meraki device detail** (Cisco/Arista) — to see if different tabs appear
+8. ~~**Resources menu**~~ ✅ nd19
+9. ~~**A non-Meraki device detail**~~ ✅ nd18 (Cisco ISR4451 — has HPNA tab instead of Meraki)
