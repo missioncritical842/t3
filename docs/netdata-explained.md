@@ -150,6 +150,30 @@ This data would map to **Cable** objects and **Interface** connections in Nautob
 
 ---
 
+## Circuit Inventory View
+
+The Circuit Inventory shows 91 WAN circuits with these columns:
+
+| Column | What it shows | Nautobot mapping |
+|---|---|---|
+| **Type** | Circuit classification (MPLS, Internet, etc.) | Circuit.circuit_type |
+| **Location ID** | Crest ID of the site | CircuitTermination.location |
+| **Carrier** | Service provider (Meraki, AT&T, etc.) | Circuit.provider |
+| **Circuit ID** | Provider's reference number | Circuit.cid |
+| **Interface Status** | Interface up/down | *(operational data)* |
+| **Circuit Status** | Active, Decommissioned (shown in red) | Circuit.status |
+| **Bandwidth (Mbps)** | Circuit speed | Circuit.commit_rate |
+| **Type** | Additional type classification | Circuit.circuit_type |
+| **Local Device** | Hostname of device at this end | CircuitTermination → Device |
+| **Local Port** | Port on the local device | CircuitTermination → Interface |
+| **Remote Device** | Hostname of device at far end | CircuitTermination (Z-side) → Device |
+| **Remote Port** | Port on the remote device | CircuitTermination (Z-side) → Interface |
+| **Description** | Free-text description | Circuit.description |
+
+**Key finding:** The Circuit Inventory has **local/remote device and port** data that the current CSV import (`netdata_circuit`) doesn't capture. This would enable full **CircuitTermination → Interface** linking in Nautobot — connecting circuits to specific switch ports on specific devices.
+
+---
+
 ## Reports Menu
 
 | Report | What it provides | CSV mapping |
@@ -349,13 +373,14 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd6 | Reports menu | 7 report types including Tacacs, OS Upgrade, Network Events, Metrics | ✅ Documented |
 | nd7 | Tools menu | HPNA Script Runner, Network Path Trace, Excel/CSV export buttons | ✅ Documented |
 | nd8 | Device detail (wwapus0278-028a-001) | 6 tabs: Device Details, Location, ServiceNow, Meraki, Exceptions, Device Events | ✅ Documented |
+| nd9 | Circuit Inventory | 91 circuits with carrier, circuit ID, status, bandwidth, local/remote device+port, description | ✅ Documented |
 
 ## Screenshots Still Needed
 
 These would help complete the documentation and plan future Nautobot imports:
 
 1. **Device detail — other tabs** — screenshots of the Location, ServiceNow, Meraki, Exceptions, and Device Events tabs
-2. **Circuit Inventory view** — the circuit list showing carriers, circuit IDs, types, bandwidth
+2. ~~**Circuit Inventory view**~~ ✅ Captured in nd9
 3. **Subnet Inventory view** — how subnets/prefixes are displayed with zones
 4. **BGP Inventory view** — BGP peering table with ASNs and peer IPs
 5. **Chassis Inventory view** — hardware purchase records with serials and dates
