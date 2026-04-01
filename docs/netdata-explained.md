@@ -1,31 +1,87 @@
-# Netdata — What It Is and What's In It
+# NetData — What It Is and What's In It
 
 ---
 
-## What Is Netdata?
+## What Is NetData?
 
-Netdata is **not a product or application** — it's the name for Corebridge's internal **network data warehouse**. It's a collection of CSV exports from multiple enterprise systems, consolidated into one place for network operations. Think of it as the client's master spreadsheet of everything they know about their network — pulled from ServiceNow, asset management, Meraki, facilities databases, and manual tracking.
+**NetData** (branded as "Corebridge NetDATA") is a **custom-built internal web application** developed by Corebridge (formerly AIG Life & Retirement). It is the company's primary network data management portal — a centralized UI for viewing, managing, and exporting network inventory data.
 
-Before Nautobot, Netdata CSVs were the primary way Corebridge tracked:
-- What devices they own
-- Where devices are deployed
-- What circuits connect their buildings
-- Who's on-call at each site
-- What subnets exist on their network
-- What software is running and what needs upgrading
-- Hardware end-of-life dates
+- **Current version:** v1.18.0
+- **URL:** Internal (CRBG network)
+- **Authentication:** CRBG LDAP
+- **Copyright:** CRBG 2024
 
-**The migration project** is moving from "CSVs in a shared drive" to "Nautobot as the live source of truth" — with Netdata CSVs being one of several data feeds into Nautobot.
+NetData is **not** a third-party product — it's a purpose-built application that aggregates data from multiple enterprise systems (ServiceNow, Meraki, HPNA, CBRE MyData, Palo Alto Panorama) into one unified view. It provides:
+- A web UI where users can browse inventories, run reports, and manage network data
+- CSV export capabilities for each inventory type
+- Integration with ServiceNow CMDB (pushes data to SNOW)
+- Integration with CBRE MyData (pulls property/facility data)
+- Integration with HPNA (HP Network Automation) — recently migrated to cloud at `https://hpnaprod.crbgf.net`
+
+**The migration project** is moving from NetData as the primary network inventory tool to **Nautobot as the live source of truth** — with NetData CSV exports being one of several data feeds into Nautobot alongside NetBrain, Meraki SSoT, and Aruba Central.
 
 ---
 
-## The 7 Sections of a Netdata Device Record
+## NetData UI Structure
 
-In the original Netdata system, each device is a rich record with 7 categories of information. Here's what each contains:
+### Main Navigation
+
+The NetData UI has three main navigation sections:
+
+| Menu | Purpose |
+|---|---|
+| **Inventories** | All network data views (devices, circuits, subnets, etc.) |
+| **Reports** | Reporting and analytics |
+| **Tools** | Utilities and management tools |
+
+Additionally: **Resources**, **Help**, **Quick Links** in the top bar.
+
+### Home Page
+
+The home page shows:
+- **Devices per Region:** AMER-E (767), AMER-W (322), EMEA (22) = ~1,111 total devices
+- **What's New** section with version release notes
+- **Useful Information** linking to the Standard Operating Procedure guide and help documentation
+
+### Inventories Menu
+
+The **Inventories** dropdown is the heart of NetData. Each menu item is a full inventory view that can be browsed in the UI and exported to CSV:
+
+| # | UI Menu Item | CSV Export Name | Rows | What It Contains | Nautobot Mapping |
+|---|---|---|---|---|---|
+| 1 | **Site Inventory** | `netdata_site` | varies | Master list of all Corebridge facilities — Crest ID, address, region, building status, capacity, headcount | Location objects |
+| 2 | **Site Planning** | `netdata_site-planning` | varies | Deployment programs, device counts per site, rollout phases, target dates | Location custom fields / metadata |
+| 3 | **Device Inventory** | `netdata_device-inventory` | ~1,777 | The "master list" — every known network device across all vendors and sites. Serial, vendor, model, IP, category, status, Crest ID | Device objects + `observations["netdata_device_inventory"]` |
+| 4 | **Subnet Inventory** | `netdata_subnet-inventory` | varies | IP address plan — network IP, wildcard mask, zone (Internal/DMZ), realty location, usage type | Prefix objects in IPAM |
+| 5 | **Port Connection Inventory** | *(no CSV import yet)* | — | Port-to-port physical connections | Would map to Cable objects |
+| 6 | **Circuit Inventory** | `netdata_circuit` | varies | WAN circuits — carrier, circuit ID, type (MPLS/internet), bandwidth, Crest site, status | Circuit + Provider + CircuitTermination |
+| 7 | **Chassis Inventory** | `netdata_chassis` | ~342 | Hardware purchases — serial, vendor, model, purchase date, Crest site ID. Mainly Meraki branch gear | Device objects + `observations["netdata_chassis"]` |
+| 8 | **Network Module Management** | *(no CSV import yet)* | — | Module/line card tracking in chassis devices | Would map to Module/InventoryItem objects |
+| 9 | **Toll Free Number** | `netdata_toll-free-number` | ~2,292 | Toll-free number assignments per site | Observations on Location objects |
+| 10 | **BGP Inventory** | `netdata_bgp` | varies | BGP peering data — ASN, peer IP, neighbor relationships | BGP observations on Device objects |
+| 11 | **DHCP Subnet Inventory** | *(possibly part of subnet inventory)* | — | DHCP scope/pool data | Would map to Prefix/IPAM objects |
+| 12 | **Panos Device** | `netdata_panos-device` | varies | Palo Alto Panorama management servers and PA-Series firewalls | Device objects + `observations["netdata_panos"]` |
+| 13 | **High Risk Country** | *(no CSV import yet)* | — | Geopolitical risk tracking for sites | Would map to Location metadata/tags |
+
+### Not in the Inventories menu but also imported:
+
+| CSV Name | Source | Rows | What It Contains |
+|---|---|---|---|
+| `netdata_network-on-call-contact` | Exported separately | varies | Network operations on-call contacts — name, email, phone, group |
+| `netdata_uccc-contact` | Exported separately | varies | UCCC team contacts |
+| `netdata_cisco-ms-teams-ext-did-mappings` | Exported separately | ~33,351 | Microsoft Teams / phone DID number mappings |
+| `netdata_netops-os-upgrade` | Exported separately | ~2,871 | OS upgrade tracking — device IP, model, upgrade status |
+| `netdata_model-eol` | Exported separately | varies | Hardware end-of-life dates by vendor/model |
+
+---
+
+## The 7 Sections of a NetData Device Record
+
+When you click into a device in NetData's Device Inventory, you see a rich record with 7 categories of information:
 
 ### 1. Device Details
 
-The core identity of the device. This is what you'd see on the "overview" tab.
+The core identity of the device.
 
 | Field | Example | What it tells you |
 |---|---|---|
@@ -47,7 +103,7 @@ The core identity of the device. This is what you'd see on the "overview" tab.
 
 ### 2. Location
 
-Where the device physically sits. This is property/facilities data, often from CBRE's MyData system.
+Where the device physically sits. Property/facilities data from CBRE's MyData system.
 
 | Field | Example | What it tells you |
 |---|---|---|
@@ -62,206 +118,134 @@ Where the device physically sits. This is property/facilities data, often from C
 | Building Status | `Active` | Is the building operational? |
 | Primary Use | `Special Purpose` | Office, Data Center, Warehouse, etc. |
 | Facility Name | `Stowe - 69 Hourglass Road` | Human-readable name |
-| Capacity | `50` | Max occupancy |
-| Headcount | `30` | Current occupancy |
+| Capacity / Headcount | `50 / 30` | Max occupancy vs current |
 | CBRE_myData_PropertyId | `416817` | Links to CBRE's property database |
 
-The location hierarchy is: **World Region → Region → Subregion → Country → State → City → Address/Facility**
+Location hierarchy: **World Region → Region → Subregion → Country → State → City → Address/Facility**
 
 ### 3. Meraki
 
-Meraki-specific data from the Meraki Dashboard cloud. Only populated for Meraki devices (APs, switches, firewalls).
+Meraki-specific data from the Meraki Dashboard cloud. Only populated for Meraki devices.
 
 | Field | Example | What it tells you |
 |---|---|---|
-| Network ID | (Meraki GUID) | Which Meraki network it's in |
-| Organization ID | (Meraki GUID) | Which Meraki org it belongs to |
-| Network Name | `1000300-Houston-Branch` | Human-readable network name |
+| Network ID / Organization ID | (Meraki GUIDs) | Which Meraki network and org |
 | Firmware Version | `wireless-30-7` | Current firmware |
-| LAN IP | `10.x.x.x` | Local network IP |
-| MAC Address | `aa:bb:cc:dd:ee:ff` | Hardware MAC |
-| Public IP | `203.x.x.x` | WAN/public IP |
+| LAN IP / Public IP / MAC | (network addresses) | Network identity |
 | Product Type | `wireless` | wireless, switch, appliance, camera, sensor |
 | Last Reported At | `2026-03-15T10:00:00Z` | Last cloud check-in |
-| License Status | `licensed` | Is the license valid? |
-| License Expiration | `2027-01-01` | When does the license expire? |
+| License Status / Expiration | `licensed` / `2027-01-01` | License health |
 
 ### 4. ServiceNow (SNOW)
 
-Data from the ServiceNow CMDB (Configuration Management Database). ServiceNow is the IT service management platform.
+Data from the ServiceNow CMDB.
 
 | Field | Example | What it tells you |
 |---|---|---|
 | Sys ID | `Sa2C5ege938dc...` | ServiceNow's unique CI identifier |
-| CI Class | `cmdb_ci_netgear` | What type of CI this is in SNOW |
-| Install Status | `In use` | SNOW's view of deployment status |
-| Operational Status | `Unknown` | SNOW's view of operational state |
-| Support Group | `Network Operations` | Assigned support team |
-| Owned By / Managed By | (person/team) | Ownership and management |
-| Cost Center | (accounting code) | Financial tracking |
-| Purchase Date | `2023-01-15` | When it was bought |
-| Warranty Expiration | `2026-01-15` | When warranty ends |
+| CI Class | `cmdb_ci_netgear` | SNOW classification |
+| Install Status / Operational Status | `In use` / `Unknown` | SNOW's view of the device |
+| Support Group / Owned By | `Network Operations` | Ownership and management |
+| Cost Center / Purchase Date / Warranty | (financial data) | Asset management |
 | Discovery Source | `Network Scan` | How SNOW learned about it |
-| First / Last Discovered | (timestamps) | Discovery history |
-
-Common CI Classes: `cmdb_ci_netgear` (generic network), `cmdb_ci_wap_network` (WAPs), `cmdb_ci_ip_switch` (switches), `cmdb_ci_ip_router` (routers), `cmdb_ci_ip_firewall` (firewalls)
 
 ### 5. Lifecycle Management
 
-Hardware and software lifecycle tracking — critical for planning replacements and upgrades.
+Hardware and software lifecycle tracking.
 
 | Field | Example | What it tells you |
 |---|---|---|
-| Purchase End of Life | `2099-12-31` | When hardware is fully EOL (far future = still active) |
-| End of Support | `2099-12-31` | When vendor stops supporting it |
-| End of Sale | `2025-12-31` | Last date to purchase new/spares |
+| Purchase End of Life | `2099-12-31` | When hardware is fully EOL |
+| End of Support | `2099-12-31` | When vendor stops supporting |
+| End of Sale | `2025-12-31` | Last date to buy new/spares |
 | SW Version | `3.22+09` | Current software version |
-| SW Status | `current` | Is the software up to date? |
+| SW Status | `current` | Is software up to date? |
 | SW Recommendation | `upgrade` | What action is recommended? |
-| Lease / Contract | (reference numbers) | Financial/contract tracking |
-| PO Number / SOW Number | (reference numbers) | Procurement tracking |
-
-Software Status values: `current` (good), `outdated` (plan upgrade), `critical` (immediate upgrade), `end-of-life` (replace urgently)
+| Lease / Contract / PO / SOW | (reference numbers) | Procurement tracking |
 
 ### 6. Circuits / Realty Data
 
-Network circuits and their connection to physical facilities. Links the network to the buildings.
+Network circuits and their connection to physical facilities.
 
 | Field | Example | What it tells you |
 |---|---|---|
-| Realty Data | `1000831` | Facility ID in the realty system |
+| Realty Data | `1000831` | Facility ID linking to realty system |
 | Circuit carrier / ID / type | AT&T / CKT-12345 / MPLS | Which circuit connects this site |
 | Bandwidth | `100000 kbps` | Circuit speed |
-| Building details | (address, lat/lng, capacity) | The physical facility this circuit terminates at |
-| Primary Use | `Office` | What the building is used for |
-
-This data answers: "What circuit connects building X to the network, and what's at that building?"
+| Building details | (address, lat/lng, capacity) | The physical facility |
 
 ### 7. Site Planning
 
-Capacity planning and site rollout data — used for network expansion projects.
+Capacity planning and site rollout data.
 
 | Field | Example | What it tells you |
 |---|---|---|
 | Device counts by type | Switches: 2, APs: 5, Firewalls: 1 | What's deployed at this site |
 | Program | `Branch Refresh 2025` | Which deployment program |
-| Phase | `Phase 2` | Rollout phase |
-| Status | `Complete` | Deployment status |
-| Target date | `2025-Q2` | When deployment is planned |
+| Phase / Status / Target date | `Phase 2` / `Complete` / `2025-Q2` | Rollout tracking |
 
 ---
 
-## The CSV Exports
+## Integrations with Other Systems
 
-Netdata's information is exported as CSV files and uploaded to Nautobot. Here are all the datasets:
+NetData doesn't exist in isolation — it actively integrates with:
 
-### Device Data
-
-| CSV Name | Rows | What's in it |
+| System | Direction | What flows |
 |---|---|---|
-| `netdata_chassis` | ~342 | **Hardware purchases.** Serial, vendor, model, purchase date, Crest site ID. Mainly Meraki branch gear. Tells you what was bought and where it was sent. |
-| `netdata_device-inventory` | ~1,777 | **Operational CMDB.** The broadest device list — serial, vendor, model, IP, category, status, Crest site ID. Every known device across all vendors and sites. The "master list." |
-| `netdata_panos-device` | varies | **Palo Alto firewalls.** Panorama management servers and PA-Series firewalls specifically. |
-| `netdata_netops-os-upgrade` | ~2,871 | **OS upgrade tracking.** Device IP, model, upgrade status, Crest ID. Tracks which devices need software upgrades and who's responsible. |
-| `netdata_model-eol` | varies | **End-of-life dates.** Vendor, model, end-of-sale, end-of-support, end-of-security-patches dates. Used to plan hardware replacements. |
+| **ServiceNow CMDB** | NetData → SNOW | Device records, vendor/model validation against CMDB hardware table |
+| **CBRE MyData** | MyData → NetData | Property/facility data, site information |
+| **HPNA** (HP Network Automation) | HPNA → NetData | Network automation data. Recently migrated to cloud: `https://hpnaprod.crbgf.net` |
+| **Meraki Dashboard** | Meraki → NetData | Meraki device data, firmware, licensing |
+| **Palo Alto Panorama** | Panorama → NetData | PAN-OS firewall data |
+| **LDAP (CRBG)** | LDAP → NetData | User authentication |
 
-### Circuit Data
+### Important note from NetData home page:
+> "Due to the ServiceNow CmdbIdentityNetdata Netgear API has not been updated yet on ServiceNow side, Netdata is currently unable to push any Managed By Group updates to the CMDB. Once ServiceNow has included the new field as an editable field for Netdata, The standard update will work. Data pulls from ServiceNow is not affected by this."
 
-| CSV Name | Rows | What's in it |
-|---|---|---|
-| `netdata_circuit` | varies | **WAN circuits.** Carrier, circuit ID, type (MPLS/internet), bandwidth, Crest site, status, description. Every circuit connecting Corebridge's buildings. |
-
-### Contact Data
-
-| CSV Name | Rows | What's in it |
-|---|---|---|
-| `netdata_network-on-call-contact` | varies | **On-call contacts.** Name, email, phone, user group. Who to call when something breaks. |
-| `netdata_uccc-contact` | varies | **UCCC contacts.** Unified communications contact center team members. |
-| `netdata_cisco-ms-teams-ext-did-mappings` | ~33,351 | **Phone/Teams mappings.** Name, extension, DID number, soft phone, desk phone. Maps people to phone numbers. |
-| `netdata_toll-free-number` | ~2,292 | **Toll-free numbers.** Number assignments per site. |
-
-### Network Data
-
-| CSV Name | Rows | What's in it |
-|---|---|---|
-| `netdata_subnet-inventory` | varies | **IP subnets.** Network IP, wildcard mask, zone (Internal/DMZ), realty location, usage type. The complete IP address plan. |
-| `netdata_bgp` | varies | **BGP peering.** ASN, peer IP, neighbor relationships. The routing infrastructure. |
-
-### Site/Location Data
-
-| CSV Name | Rows | What's in it |
-|---|---|---|
-| `netdata_site` | varies | **Site master list.** Crest ID, address, region, building status, capacity. The authoritative list of all Corebridge facilities. |
-| `netdata_site-planning` | varies | **Site planning data.** Device counts, deployment program, phase, target dates. |
+This tells us NetData has a **bidirectional relationship with ServiceNow** — it both reads from and writes to the CMDB.
 
 ---
 
-## How Netdata Data Gets Into Nautobot
+## The Crest ID — The Universal Key
 
-### Step 1: Upload CSVs
-Someone exports CSVs from the various source systems and uploads them to Nautobot using the **"Delimited Data Upload"** job. This stores the CSV text in a ConfigContext called **"CSV Data Store"**.
+The **Crest ID** is the numeric facility code (like `1000278`) that uniquely identifies a physical site across all of NetData. Every inventory references sites by Crest ID:
 
-### Step 2: Run Import Jobs
-Each CSV has a corresponding Nautobot job:
-
-| CSV | Job | What it creates in Nautobot |
-|---|---|---|
-| `netdata_chassis` | Observations Device Rollup (Phase 1) | Device + `observations["netdata_chassis"]` |
-| `netdata_device-inventory` | Observations Device Rollup (Phase 1b) | Device + `observations["netdata_device_inventory"]` |
-| `netdata_panos-device` | Observations Device Rollup (Phase 1c) | Device + `observations["netdata_panos"]` |
-| `netdata_netops-os-upgrade` | Observations Device Rollup (Phase 1d) | Device + `observations["netdata_netops_upgrade"]` |
-| `netdata_model-eol` | Observations Device Rollup (Phase 3) | HardwareLCM records (lifecycle notices) |
-| `netdata_circuit` | Netdata Circuit Import | Circuit + Provider + CircuitTermination |
-| `netdata_network-on-call-contact` | Netdata Contact Import | Contact + Team |
-| `netdata_uccc-contact` | Netdata Contact Import | Contact + Team |
-| `netdata_subnet-inventory` | Netdata Subnet Import | Prefix (in Internal/DMZ namespace) |
-| `netdata_bgp` | Netdata BGP Import | BGP observations on devices |
-
-### Step 3: Rollup
-The Observations Device Rollup (Phase 2) reads all observation namespaces and populates canonical Nautobot fields: management IP, software version, etc.
-
----
-
-## How Netdata Relates to Other Systems
-
-Netdata is **one of five data sources** feeding into Nautobot:
-
-```
-Netdata (CSVs from CMDB/asset mgmt)
-   ├── What we bought (chassis)
-   ├── What's deployed (inventory)
-   ├── What circuits connect us (circuits)
-   ├── Who to call (contacts)
-   └── What IPs we use (subnets/BGP)
-
-NetBrain (live network discovery)
-   └── What's actually on the network right now
-
-Meraki (cloud management)
-   └── Meraki devices from the dashboard
-
-Aruba Central (cloud management)
-   └── Aruba switches and APs
-
-MyData / CBRE (property database)
-   └── Building/facility information
-```
-
-**Netdata knows what you bought and deployed. NetBrain knows what's actually running.** The overlap is where the most valuable insights come from — discrepancies between what's in the CMDB versus what's on the network.
-
----
-
-## The Crest ID — The Key That Links Everything
-
-The **Crest ID** (also called Realty Data ID) is the universal site identifier across all Netdata CSVs. It's a numeric code like `1000278` that uniquely identifies a physical facility.
-
-Every CSV references sites by Crest ID:
-- Device chassis: "this device was shipped to Crest ID 1000278"
-- Device inventory: "this device is deployed at Crest ID 1000278"
-- Circuits: "this circuit terminates at Crest ID 1000278"
+- Device Inventory: "this device is at Crest ID 1000278"
+- Circuit Inventory: "this circuit terminates at Crest ID 1000278"
+- Chassis Inventory: "this hardware was shipped to Crest ID 1000278"
 - Contacts: "this person is on-call for Crest ID 1000278"
-- Subnets: "this IP range is assigned to Crest ID 1000278"
+- Subnets: "this IP range is at Crest ID 1000278"
 
-In Nautobot, Crest IDs map to Location objects (either in the `facility` field or as alias locations with the Crest ID as the name).
+In Nautobot, Crest IDs map to Location objects via the `facility` field. We also created alias locations with the Crest ID as the name so import jobs can find them.
 
 Example: Crest ID `1000278` = Chicago - 500 West Madison Street
+
+---
+
+## What's Not Yet Imported Into Nautobot
+
+These NetData inventories exist in the UI but don't have corresponding CSV imports yet:
+
+| Inventory | Potential Nautobot Mapping | Priority |
+|---|---|---|
+| **Port Connection Inventory** | Cable objects (device-to-device connections) | High — physical topology |
+| **Network Module Management** | Module / InventoryItem objects | Medium — hardware tracking |
+| **DHCP Subnet Inventory** | IPAM Prefix objects with DHCP role | Medium — IP management |
+| **High Risk Country** | Location tags or custom fields | Low — security metadata |
+
+---
+
+## Screenshots That Would Help
+
+To better understand NetData and improve this documentation, screenshots of the following would be very valuable:
+
+1. **Device Inventory view** — what the device list looks like (columns, filters, search)
+2. **A single device detail page** — showing all 7 sections for one device
+3. **Circuit Inventory view** — the circuit list with carriers and sites
+4. **Subnet Inventory view** — how subnets are displayed
+5. **BGP Inventory view** — how BGP peering is shown
+6. **Site Inventory view** — how sites/locations are listed
+7. **Reports menu** — what reports are available
+8. **Tools menu** — what tools/utilities exist
+9. **Any export/download dialog** — how CSVs are exported
+10. **Port Connection Inventory** — this one has no CSV yet, understanding the data structure would help plan the Nautobot import
