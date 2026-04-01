@@ -150,6 +150,34 @@ This data would map to **Cable** objects and **Interface** connections in Nautob
 
 ---
 
+## Chassis Inventory View
+
+**818 items** — hardware asset tracking with full lifecycle data. Larger than the 342-row CSV export (the CSV may be a filtered subset).
+
+| Column | What it shows | Nautobot mapping |
+|---|---|---|
+| **Host Name** | Device hostname | Device.name |
+| **Location ID** | Crest ID | Device.location |
+| **Management IP** | Management IP | Device.primary_ip4 |
+| **Serial Number** | Hardware serial | Device.serial |
+| **Vendor** | Manufacturer (Meraki, Cisco) | Manufacturer |
+| **Model** | Hardware model (MR42, MS250-48FP, MX84, WS-C3850, C9300-48P) | DeviceType |
+| **Category** | wireless, switch, router | Role |
+| **Purchase Date** | When hardware was bought | `netdata_purchase_date` custom field |
+| **End of Life** | Full hardware EOL date | HardwareLCM.end_of_life |
+| **End of Support** | Vendor support end date | HardwareLCM.end_of_support |
+| **End of Sale** | Last purchasable date | HardwareLCM.end_of_sale |
+| **Purchasable** | Can still be purchased? | Derived from End of Sale |
+| **SW Version** | Current software/firmware | Device.software_version |
+| **SW Status** | current, outdated, critical | Software compliance status |
+| **SW Recommendation** | upgrade, maintain, replace | Action needed |
+| **End of Support Quarter** | Planning quarter for replacement | Lifecycle planning |
+| **Lease Comment** | Lease/contract notes | Asset management |
+
+This is the **single view that combines hardware identity, lifecycle, and software compliance** — the key data for planning refreshes and upgrades.
+
+---
+
 ## Circuit Inventory View
 
 The Circuit Inventory shows 91 WAN circuits with these columns:
@@ -245,7 +273,7 @@ Usage Type breakdown tells you **what the subnet is for**: wireless networks, VP
 | **Tacacs Accounting** | TACACS+ authentication/authorization logs | *(no CSV)* |
 | **Site Upgrade Info** | Site-level upgrade status and planning | Related to `netdata_site-planning` |
 | **Netops OS Upgrade** | Device OS upgrade tracking | `netdata_netops-os-upgrade` CSV |
-| **Network Exceptions** | Devices/configs that deviate from standards | *(no CSV)* |
+| **Network Exceptions** | HPNA policy violations — ~1,000+ compliance exceptions showing devices that don't meet standard config | *(no CSV)* |
 | **Network Events** | Network events and incidents | *(no CSV)* |
 | **Metrics** | Performance and operational metrics | *(no CSV)* |
 | **Cisco MS Teams Ext DID Mappings** | Phone extension/DID number mappings | `netdata_cisco-ms-teams-ext-did-mappings` CSV |
@@ -496,6 +524,8 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd17 | Site Inventory | 105 sites: Crest ID, MyData PropertyId, Region, Address, Building Status, Capacity, HRC Status, Site Category | ✅ Documented |
 | nd18 | Non-Meraki device detail (Cisco ISR4451) | Different tabs: HPNA instead of Meraki. Cisco IOS family, cmdb_ci_ip_router, Full monitoring | ✅ Documented |
 | nd19 | Resources menu | Network On Call Contacts/Schedule, UCCC Contacts/On Duty Schedule | ✅ Documented |
+| nd20 | Chassis Inventory | 818 items: hostname, serial, vendor, model, category, purchase date, EOL/EOS/EOS dates, SW version/status/recommendation | ✅ Documented |
+| nd21 | Network Exceptions report | ~1,000+ HPNA policy violations and compliance exceptions by device | ✅ Documented |
 
 ## Screenshots Still Needed
 
@@ -506,7 +536,7 @@ These would help complete the documentation and plan future Nautobot imports:
 3. ~~**Subnet Inventory**~~ ✅ nd16
 4. ~~**BGP Inventory**~~ ✅ nd15
 5. ~~**Site Inventory**~~ ✅ nd17
-6. **Chassis Inventory view** — hardware purchase records with serials and dates
-7. **A Reports page** (e.g., Netops OS Upgrade or Network Exceptions) — to understand report format
+6. ~~**Chassis Inventory view**~~ ✅ nd20 (818 items with full lifecycle + software status)
+7. ~~**A Reports page**~~ ✅ nd21 (Network Exceptions — HPNA policy violations)
 8. ~~**Resources menu**~~ ✅ nd19
 9. ~~**A non-Meraki device detail**~~ ✅ nd18 (Cisco ISR4451 — has HPNA tab instead of Meraki)
