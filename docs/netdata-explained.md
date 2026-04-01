@@ -203,7 +203,7 @@ When you click a hostname in the Device Inventory, you see the device detail pag
 
 **Tabs:** Device Details | Location | ServiceNow | Meraki | Exceptions | Device Events
 
-> Note: Joshua's original documentation described 7 data sections (Device Details, Location, Meraki, ServiceNow, Lifecycle Management, Circuits/Realty, Site Planning). In the actual UI, some of these may be fields within tabs rather than separate tabs, or they may appear only for certain device types. The Lifecycle, Circuits, and Site Planning data appears to be part of the site-level view rather than the device-level view.
+> Note: Joshua's documentation described 7 data sections including Lifecycle Management, Circuits/Realty, and Site Planning. In the actual UI these are accessed at the **site level** (nd4), not the device level. The device detail has 6 tabs focused on the device itself. Lifecycle data (EOL dates, software versions) comes from the `netdata_model-eol` and `netdata_netops-os-upgrade` CSVs rather than being visible on the device page.
 
 ### 1. Device Details
 
@@ -227,9 +227,9 @@ The core identity of the device.
 | Network Flags | `wireless` | Tags like wireless, wired, vpn |
 | Confirmed | `true` | Has someone physically verified this device exists? |
 
-### 2. Location
+### 2. Location Tab
 
-Where the device physically sits. Property/facilities data from CBRE's MyData system.
+Where the device physically sits. Property/facilities data pulled from CBRE's MyData system via the CBRE_myData_PropertyId link.
 
 | Field | Example | What it tells you |
 |---|---|---|
@@ -249,7 +249,25 @@ Where the device physically sits. Property/facilities data from CBRE's MyData sy
 
 Location hierarchy: **World Region → Region → Subregion → Country → State → City → Address/Facility**
 
-### 3. Meraki
+### 3. ServiceNow Tab
+
+Data from the ServiceNow CMDB. Shows how ServiceNow classifies and tracks this device. Includes a thumbnail image of the device.
+
+| Field | Example | What it tells you |
+|---|---|---|
+| Sys Id | `fbca71f747d9...` | ServiceNow's unique CI identifier |
+| Management IP | `10.194.177.5` | IP as known to SNOW |
+| Host Name / Serial / Vendor / Model | (matches Device Details) | SNOW's copy of identity fields |
+| Device Type | `Wireless Access Point` | SNOW classification |
+| Sys Class Name | `cmdb_ci_netgear` | SNOW CI class |
+| Subcategory | `Network` | SNOW subcategory |
+| Install Status | `Installed` | Deployment state in SNOW |
+| Operational Status | `Operational` | Runtime state in SNOW |
+| Discovery Source | `BH-ETL-NET` | How SNOW learned about this device |
+| Support Group / Approval Group / Managed By | `Network Operations` | Ownership in SNOW |
+| Monitoring Type | `Out-of-Scope` | Monitoring coverage |
+
+### 4. Meraki Tab
 
 Meraki-specific data from the Meraki Dashboard cloud. Only populated for Meraki devices.
 
@@ -262,53 +280,46 @@ Meraki-specific data from the Meraki Dashboard cloud. Only populated for Meraki 
 | Last Reported At | `2026-03-15T10:00:00Z` | Last cloud check-in |
 | License Status / Expiration | `licensed` / `2027-01-01` | License health |
 
-### 4. ServiceNow (SNOW)
+### 5. Exceptions Tab
 
-Data from the ServiceNow CMDB.
+Tracks **sync failures** between NetData and ServiceNow. When NetData tries to push field updates to the SNOW CMDB and fails, the exception is logged here.
 
-| Field | Example | What it tells you |
-|---|---|---|
-| Sys ID | `Sa2C5ege938dc...` | ServiceNow's unique CI identifier |
-| CI Class | `cmdb_ci_netgear` | SNOW classification |
-| Install Status / Operational Status | `In use` / `Unknown` | SNOW's view of the device |
-| Support Group / Owned By | `Network Operations` | Ownership and management |
-| Cost Center / Purchase Date / Warranty | (financial data) | Asset management |
-| Discovery Source | `Network Scan` | How SNOW learned about it |
+| Column | What it shows |
+|---|---|
+| **Exception Details** | What failed (e.g., "Attempt to update SNOW approvalGroup from 'null' to 'Network Operations-Mgr' failed") |
+| **Notes** | Additional context |
+| **Group Name** | Which group/category |
+| **Category** | Exception category |
+| **Created At** | When the exception occurred |
+| **Updated At** | Last update |
 
-### 5. Lifecycle Management
+This is valuable for **data quality monitoring** — shows where NetData and ServiceNow are out of sync.
 
-Hardware and software lifecycle tracking.
+### 6. Device Events Tab
 
-| Field | Example | What it tells you |
-|---|---|---|
-| Purchase End of Life | `2099-12-31` | When hardware is fully EOL |
-| End of Support | `2099-12-31` | When vendor stops supporting |
-| End of Sale | `2025-12-31` | Last date to buy new/spares |
-| SW Version | `3.22+09` | Current software version |
-| SW Status | `current` | Is software up to date? |
-| SW Recommendation | `upgrade` | What action is recommended? |
-| Lease / Contract / PO / SOW | (reference numbers) | Procurement tracking |
+A full **audit log** of everything that's happened to this device in NetData. Shows 153 events for this one device, including:
 
-### 6. Circuits / Realty Data
+- "Attempting to synchronize device"
+- "Normal sync process for wwapus0278-028a-001 / 10.194.177.107 completed"
+- "Updated SNOW model from 'null' to 'MR42'"
+- "Updated SNOW deviceType from 'null' to 'Wireless Access Point'"
+- "Found multiple snow ci records matching managementIp: 10.194.177.10 or serialNumber: Q2KD-9445-UKQ1"
 
-Network circuits and their connection to physical facilities.
+| Column | What it shows |
+|---|---|
+| **Description** | What happened |
+| **Created By** | Who/what triggered it (admin, kkumarga, internal) |
+| **Created At** | Timestamp (events go back to 2023) |
 
-| Field | Example | What it tells you |
-|---|---|---|
-| Realty Data | `1000831` | Facility ID linking to realty system |
-| Circuit carrier / ID / type | AT&T / CKT-12345 / MPLS | Which circuit connects this site |
-| Bandwidth | `100000 kbps` | Circuit speed |
-| Building details | (address, lat/lng, capacity) | The physical facility |
+This audit trail shows the **full history of data synchronization** between NetData and external systems.
 
-### 7. Site Planning
+### Lifecycle, Circuits, and Site Planning Data
 
-Capacity planning and site rollout data.
+These data categories from Joshua's documentation are accessed at the **site level** (Site Inventory → click a Crest ID), not the device level:
 
-| Field | Example | What it tells you |
-|---|---|---|
-| Device counts by type | Switches: 2, APs: 5, Firewalls: 1 | What's deployed at this site |
-| Program | `Branch Refresh 2025` | Which deployment program |
-| Phase / Status / Target date | `Phase 2` / `Complete` / `2025-Q2` | Rollout tracking |
+- **Lifecycle Management** (EOL dates, software versions) — comes from `netdata_model-eol` and `netdata_netops-os-upgrade` CSVs
+- **Circuits / Realty Data** — visible on the site detail page Circuits tab (nd4) and Circuit Inventory (nd9)
+- **Site Planning** (device counts, deployment programs) — visible on the site detail page and `netdata_site-planning` CSV
 
 ---
 
@@ -374,12 +385,17 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd7 | Tools menu | HPNA Script Runner, Network Path Trace, Excel/CSV export buttons | ✅ Documented |
 | nd8 | Device detail (wwapus0278-028a-001) | 6 tabs: Device Details, Location, ServiceNow, Meraki, Exceptions, Device Events | ✅ Documented |
 | nd9 | Circuit Inventory | 91 circuits with carrier, circuit ID, status, bandwidth, local/remote device+port, description | ✅ Documented |
+| nd10 | Device detail — Location tab | Full facility data from MyData: region, country, city, address, lat/lng, building status, capacity, headcount | ✅ Documented |
+| nd11 | Device detail — ServiceNow tab | CMDB data: Sys ID, device type, install/operational status, discovery source, support group, monitoring type, device image | ✅ Documented |
+| nd12 | Device detail — Meraki tab | Meraki Dashboard data: WAN IPs, serial, MAC, lat/lng, address, LAN IP, network ID, model, claimed at | ✅ Documented |
+| nd13 | Device detail — Exceptions tab | ServiceNow sync failures: 4 exceptions showing failed CMDB field updates with timestamps | ✅ Documented |
+| nd14 | Device detail — Device Events tab | Full audit log (153 events): sync attempts, SNOW updates, duplicate CI detection, created by/timestamps | ✅ Documented |
 
 ## Screenshots Still Needed
 
 These would help complete the documentation and plan future Nautobot imports:
 
-1. **Device detail — other tabs** — screenshots of the Location, ServiceNow, Meraki, Exceptions, and Device Events tabs
+1. ~~**Device detail — all tabs**~~ ✅ Captured in nd8-nd14
 2. ~~**Circuit Inventory view**~~ ✅ Captured in nd9
 3. **Subnet Inventory view** — how subnets/prefixes are displayed with zones
 4. **BGP Inventory view** — BGP peering table with ASNs and peer IPs
