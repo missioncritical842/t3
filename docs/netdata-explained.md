@@ -173,9 +173,13 @@ This data would map to **Cable** objects and **Interface** connections in Nautob
 
 ---
 
-## The 7 Sections of a NetData Device Record
+## Device Detail Page
 
-When you click into a device in NetData's Device Inventory, you see a rich record with 7 categories of information:
+When you click a hostname in the Device Inventory, you see the device detail page with **6 tabs**:
+
+**Tabs:** Device Details | Location | ServiceNow | Meraki | Exceptions | Device Events
+
+> Note: Joshua's original documentation described 7 data sections (Device Details, Location, Meraki, ServiceNow, Lifecycle Management, Circuits/Realty, Site Planning). In the actual UI, some of these may be fields within tabs rather than separate tabs, or they may appear only for certain device types. The Lifecycle, Circuits, and Site Planning data appears to be part of the site-level view rather than the device-level view.
 
 ### 1. Device Details
 
@@ -344,12 +348,13 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | nd5 | Port Connection Inventory | Column headers (MAC, IP, Port, Vendor, DHCP, Speed, Duplex), empty data | ✅ Documented |
 | nd6 | Reports menu | 7 report types including Tacacs, OS Upgrade, Network Events, Metrics | ✅ Documented |
 | nd7 | Tools menu | HPNA Script Runner, Network Path Trace, Excel/CSV export buttons | ✅ Documented |
+| nd8 | Device detail (wwapus0278-028a-001) | 6 tabs: Device Details, Location, ServiceNow, Meraki, Exceptions, Device Events | ✅ Documented |
 
 ## Screenshots Still Needed
 
 These would help complete the documentation and plan future Nautobot imports:
 
-1. **A single device detail page** — click a hostname in Device Inventory to see all 7 sections (Device Details, Location, Meraki, ServiceNow, Lifecycle, Circuits, Site Planning)
+1. **Device detail — other tabs** — screenshots of the Location, ServiceNow, Meraki, Exceptions, and Device Events tabs
 2. **Circuit Inventory view** — the circuit list showing carriers, circuit IDs, types, bandwidth
 3. **Subnet Inventory view** — how subnets/prefixes are displayed with zones
 4. **BGP Inventory view** — BGP peering table with ASNs and peer IPs
