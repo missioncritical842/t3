@@ -333,17 +333,27 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 
 ---
 
-## Screenshots That Would Help
+## Screenshots Collected
 
-To better understand NetData and improve this documentation, screenshots of the following would be very valuable:
+| # | Screenshot | What it shows | Status |
+|---|---|---|---|
+| nd1 | Home page | Version (v1.18.0), What's New, Devices per Region, HPNA migration note | ✅ Documented |
+| nd2 | Inventories menu | All 13 inventory types in dropdown | ✅ Documented |
+| nd3 | Device Inventory list | Columns, 1111 devices, boolean system flags (HPNA/Spectrum/Prime/SNOW/Meraki) | ✅ Documented |
+| nd4 | Site Detail (Crest 1000278) | Chicago office, tabs, summary counts, Google Map, address, capacity | ✅ Documented |
+| nd5 | Port Connection Inventory | Column headers (MAC, IP, Port, Vendor, DHCP, Speed, Duplex), empty data | ✅ Documented |
+| nd6 | Reports menu | 7 report types including Tacacs, OS Upgrade, Network Events, Metrics | ✅ Documented |
+| nd7 | Tools menu | HPNA Script Runner, Network Path Trace, Excel/CSV export buttons | ✅ Documented |
 
-1. **Device Inventory view** — what the device list looks like (columns, filters, search)
-2. **A single device detail page** — showing all 7 sections for one device
-3. **Circuit Inventory view** — the circuit list with carriers and sites
-4. **Subnet Inventory view** — how subnets are displayed
-5. **BGP Inventory view** — how BGP peering is shown
-6. **Site Inventory view** — how sites/locations are listed
-7. **Reports menu** — what reports are available
-8. **Tools menu** — what tools/utilities exist
-9. **Any export/download dialog** — how CSVs are exported
-10. **Port Connection Inventory** — this one has no CSV yet, understanding the data structure would help plan the Nautobot import
+## Screenshots Still Needed
+
+These would help complete the documentation and plan future Nautobot imports:
+
+1. **A single device detail page** — click a hostname in Device Inventory to see all 7 sections (Device Details, Location, Meraki, ServiceNow, Lifecycle, Circuits, Site Planning)
+2. **Circuit Inventory view** — the circuit list showing carriers, circuit IDs, types, bandwidth
+3. **Subnet Inventory view** — how subnets/prefixes are displayed with zones
+4. **BGP Inventory view** — BGP peering table with ASNs and peer IPs
+5. **Chassis Inventory view** — hardware purchase records with serials and dates
+6. **Site Inventory list view** — the full site list (not a single site detail)
+7. **A Reports page** (e.g., Netops OS Upgrade or Network Exceptions) — to understand report format
+8. **Resources menu** — haven't seen what's in this dropdown yet
