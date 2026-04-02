@@ -1,5 +1,15 @@
 # NetData → Nautobot Migration Plan
 
+## Executive Summary
+
+**NetData is an aggregator, not a source.** Almost all its data originates from other systems (ServiceNow, Meraki, HPNA, BlueCat, MyData, Sakon, etc.). The migration strategy is to pull from the **original sources** wherever possible, using NetData CSVs only as a bridge for data that doesn't have a direct API integration yet.
+
+There are **12 integrations** feeding into Nautobot. Getting them all to coexist — writing observations without clobbering each other — is the primary challenge. Fine-tuning field resolution and user experience comes after all sources are importing successfully.
+
+**Per Joshua (April 2026):** Contacts will be manually managed. Purchase/asset data is future scope. The priority is getting 11 inbound sources + 1 outbound (ServiceNow) working together.
+
+---
+
 ## How NetData's Data Is Structured (Inferred Backend)
 
 Based on the 24 screenshots and CSV exports, NetData's backend database likely has these core tables:
@@ -287,6 +297,51 @@ NetData Port Connections        →  Cable + Interface
 
 ---
 
+## Data Source Authority — Who Creates vs Who Supplements
+
+### Creators (build the device object)
+
+| Device Type | Creator | Why |
+|---|---|---|
+| **Meraki devices** | **Meraki SSoT** | Cloud management platform is authoritative for claimed/licensed devices |
+| **Aruba switches/APs** | **Aruba Central** | Cloud management platform |
+| **SilverPeak WAN Opt** | **Aruba Orchestrator** | SD-WAN management platform |
+| **Cisco/Arista/Palo Alto/F5** | **Device Inventory CSV** | No cloud platform — CMDB is the business-approved record |
+| **IP Phones** | **NetBrain** | Only source that discovers them |
+| **Devices not in CMDB** | **NetBrain** | Proof they exist on the network — flag for CMDB review |
+
+### Supplementers (add observations only, never create)
+
+| Source | Adds to | Unique data it provides |
+|---|---|---|
+| **NetBrain** | ALL devices it discovers | Live interfaces, IPs, BGP, routing protocols, site topology |
+| **HPNA** | Cisco/Arista/traditional | HA pairs (only source), live SW version, SSH/SNMP reachability, compliance |
+| **Chassis CSV** | Devices with purchase records | Purchase date, EOL/EOS dates, procurement refs |
+| **PAN-OS CSV** | Palo Alto firewalls | Panorama management data |
+| **NetOps Upgrade CSV** | Devices needing upgrades | SW upgrade tracking |
+| **ServiceNow** (future) | All CMDB-tracked devices | Sys ID, CI class, support groups, ownership |
+| **Device Inventory CSV** | Devices created by cloud platforms | CMDB fields for devices Meraki/Aruba already created |
+
+### Standalone (not device-related)
+
+| Source | Creates | Notes |
+|---|---|---|
+| **MyData/CBRE** | Location objects | Authoritative for physical locations |
+| **BlueCat** | Prefix objects | Authoritative for IP subnets |
+| **Sakon** | Circuit objects | Authoritative for WAN circuits (carrier, billing, status) |
+| **Contact CSVs** | Contact objects | Manually managed per location — not a priority |
+| **Model EOL CSV** | HardwareLCM records | Hardware lifecycle notices |
+
+### What's NOT an integration (per Joshua)
+
+| Data | Status | Plan |
+|---|---|---|
+| **Contacts/on-call** | Manually updated per location | Future fine-tuning, not an integration |
+| **Purchase/asset data** | Not yet discussed | Future scope |
+| **Device Events/Exceptions** | NetData-internal | Not reproducible, won't be migrated |
+
+---
+
 ## Recommended Import Sequence
 
 Order matters — parent objects must exist before children. Here's the recommended sequence:
@@ -350,9 +405,10 @@ Single rollup job reads all observation namespaces and writes canonical fields:
 | **Device.role** | Device Inventory (category) > NetBrain (subTypeName) |
 
 ### Phase 4: Network Data
-1. **Circuits** (`netdata_circuit`)
+1. **Circuits** (`sakon_circuits` — authoritative source is Sakon TEM platform)
    - Creates Provider, CircuitType, Circuit, CircuitTermination
    - Links terminations to Locations and optionally to Interfaces
+   - Note: `netdata_circuit` may be a view of the same Sakon data enriched with local/remote device+port info
 
 2. **Subnets** (`netdata_subnet-inventory`)
    - Creates Prefix in correct Namespace (Internal/DMZ 1)
@@ -477,6 +533,7 @@ Every data source gets a namespace. This is the complete registry:
 | `aruba_central` | Aruba Central API | Aruba Central Device Import | Device |
 | `aruba_orchestrator` | Aruba Orchestrator API | Aruba Orchestrator Import | Device |
 | `netdata_circuit` | Circuit CSV | Netdata Circuit Import | Circuit |
+| `sakon` | Sakon TEM CSV | Sakon Circuit Rollup | Circuit |
 | `netdata_network_on_call` | On-Call CSV | Netdata Contact Import | Contact |
 | `netdata_uccc` | UCCC CSV | Netdata Contact Import | Contact |
 | `netdata_bgp` | BGP CSV | Netdata BGP Import | Device |

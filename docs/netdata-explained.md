@@ -490,16 +490,23 @@ NetData also has **Help** resources: page-level help, SOP documents, bug/feedbac
 
 ## Integrations with Other Systems
 
-NetData doesn't exist in isolation — it actively integrates with:
+NetData is an **aggregator** — almost all its data comes from other systems. It is NOT a primary data source. Understanding this is critical for the Nautobot migration: we should pull from the original sources wherever possible, not from NetData.
 
-| System | Direction | What flows |
-|---|---|---|
-| **ServiceNow CMDB** | NetData → SNOW | Device records, vendor/model validation against CMDB hardware table |
-| **CBRE MyData** | MyData → NetData | Property/facility data, site information |
-| **HPNA** (HP Network Automation) | HPNA → NetData | Network automation data. Recently migrated to cloud: `https://hpnaprod.crbgf.net` |
-| **Meraki Dashboard** | Meraki → NetData | Meraki device data, firmware, licensing |
-| **Palo Alto Panorama** | Panorama → NetData | PAN-OS firewall data |
-| **LDAP (CRBG)** | LDAP → NetData | User authentication |
+| System | Direction | What flows | Can Nautobot pull directly? |
+|---|---|---|---|
+| **ServiceNow CMDB** | Bidirectional (NetData ↔ SNOW) | Device records, vendor/model validation, CI status | Future — API access planned |
+| **CBRE MyData** | MyData → NetData | Property/facility data, site information | ✅ MyData import jobs exist |
+| **HPNA** (HP Network Automation) | HPNA → NetData | Live SW version, HA pairs, access flags, compliance | ❓ Need API access |
+| **Meraki Dashboard** | Meraki → NetData | Meraki device data, firmware, licensing | ✅ Meraki SSoT plugin |
+| **Palo Alto Panorama** | Panorama → NetData | PAN-OS firewall data | Via PAN-OS CSV |
+| **BlueCat IPAM** | BlueCat → NetData | All 5,373 subnets | ⚠️ Partial integration |
+| **Sakon** (TEM platform) | Sakon → NetData | Circuit data: carrier, circuit ID, bandwidth, status, billing | ✅ Sakon Circuit Rollup job |
+| **CA Spectrum** | Spectrum → NetData | Device monitoring presence (boolean flag only) | ❓ Unknown |
+| **Cisco Prime** | Prime → NetData | Device presence (boolean flag only) | ❓ Unknown |
+| **LDAP (CRBG)** | LDAP → NetData | User authentication | N/A |
+
+### Key insight: NetData is being replaced, not replicated
+The Nautobot migration strategy is NOT to rebuild NetData's aggregation logic. Instead, Nautobot pulls directly from the **11 original sources** (Meraki, Aruba Central, Aruba Orchestrator, NetBrain, MyData, BlueCat, Sakon, HPNA, ServiceNow, Cisco ACI, Arista CloudVision) plus NetData CSVs as a bridge for data that doesn't have a direct integration yet.
 
 ### Important note from NetData home page:
 > "Due to the ServiceNow CmdbIdentityNetdata Netgear API has not been updated yet on ServiceNow side, Netdata is currently unable to push any Managed By Group updates to the CMDB. Once ServiceNow has included the new field as an editable field for Netdata, The standard update will work. Data pulls from ServiceNow is not affected by this."
@@ -534,6 +541,35 @@ These NetData inventories exist in the UI but don't have corresponding CSV impor
 | **Network Module Management** | Module / InventoryItem objects | Medium — hardware tracking |
 | **DHCP Subnet Inventory** | IPAM Prefix objects with DHCP role | Medium — IP management |
 | **High Risk Country** | Location tags or custom fields | Low — security metadata |
+
+### Data that won't be migrated as integrations
+Per Joshua (April 2026):
+- **Contacts/on-call** — will be manually updated per location. Not a priority, not an integration.
+- **Purchase/asset data** — not yet discussed. Future scope.
+- **Device Events/Exceptions** — NetData-internal audit logs, not reproducible from external sources.
+
+---
+
+## The 12 Integrations (The Big Picture)
+
+NetData is one of 12 data sources feeding into Nautobot. The project is getting all 12 to coexist without clobbering each other:
+
+| # | Source | Direction | Status | What it provides |
+|---|---|---|---|---|
+| 1 | **Meraki SSoT** | In → Nautobot | ✅ Working | Meraki devices (APs, switches, firewalls) |
+| 2 | **Aruba Central** | In → Nautobot | ✅ Working | Aruba switches and APs |
+| 3 | **Aruba Orchestrator** | In → Nautobot | ✅ Working | SilverPeak WAN optimizers |
+| 4 | **NetBrain** | In → Nautobot | ✅ Working | Live network discovery (~1,042 devices) |
+| 5 | **MyData/CBRE** | In → Nautobot | ✅ Working | Physical locations/properties |
+| 6 | **BlueCat** | In → Nautobot | ⚠️ Partial | Subnets/IPAM |
+| 7 | **HPNA** | In → Nautobot | ❓ Need API access | HA pairs, SW versions, compliance |
+| 8 | **Sakon** | In → Nautobot | ✅ Working | Circuits (carrier, billing, status) |
+| 9 | **NetData CSVs** | In → Nautobot | ✅ Working | Bridge data until direct integrations replace it |
+| 10 | **Cisco ACI** | In → Nautobot | ❓ Unknown | ACI fabric data |
+| 11 | **Arista CloudVision** | In → Nautobot | ⚠️ Partial | Arista device management |
+| 12 | **ServiceNow** | Out ← Nautobot | ❓ Future | Push canonical data back to CMDB |
+
+**Phase 1** (current): Get all sources importing with observations. **Phase 2** (next): Fine-tune rollup rules so sources don't clobber each other. **Phase 3** (future): Contacts, asset tracking, compliance reporting.
 
 ---
 
