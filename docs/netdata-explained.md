@@ -506,7 +506,15 @@ NetData is an **aggregator** — almost all its data comes from other systems. I
 | **LDAP (CRBG)** | LDAP → NetData | User authentication | N/A |
 
 ### Key insight: NetData is being replaced, not replicated
-The Nautobot migration strategy is NOT to rebuild NetData's aggregation logic. Instead, Nautobot pulls directly from the **11 original sources** (Meraki, Aruba Central, Aruba Orchestrator, NetBrain, MyData, BlueCat, Sakon, HPNA, ServiceNow, Cisco ACI, Arista CloudVision) plus NetData CSVs as a bridge for data that doesn't have a direct integration yet.
+The Nautobot migration strategy is NOT to rebuild NetData's aggregation logic. Instead, Nautobot pulls directly from the **12 original sources** plus NetData CSVs as bridge data.
+
+### Critical finding from Phase 1 Deliverable (Trace3 comparative analysis):
+- **~50% of NetData's data is sourced from HPNA.** HPNA connects to live devices for data collection, parsing, and storing device backups.
+- **HPNA data is accessed via a managed MS SQL database.** Nautobot could query this database directly via custom jobs.
+- **Nautobot could replace HPNA entirely** using the Device Onboarding App (NAPALM/Netmiko connecting directly to devices).
+- **Circuit data originates from HPNA** — show commands → regex parsing → spreadsheet → manual upload to NetData. Now being replaced by Sakon integration.
+- **Subnet Inventory cross-validates** HPNA-discovered networks against BlueCat. Networks not in BlueCat are flagged.
+- **HPNA software has uncertain long-term support** — acquired by HP → Micro Focus (2016) → OpenText (2023). Current support status unknown.
 
 ### Important note from NetData home page:
 > "Due to the ServiceNow CmdbIdentityNetdata Netgear API has not been updated yet on ServiceNow side, Netdata is currently unable to push any Managed By Group updates to the CMDB. Once ServiceNow has included the new field as an editable field for Netdata, The standard update will work. Data pulls from ServiceNow is not affected by this."
@@ -550,24 +558,30 @@ Per Joshua (April 2026):
 
 ---
 
-## The 12 Integrations (The Big Picture)
+## The Official 12 Integrations
 
-NetData is one of 12 data sources feeding into Nautobot. The project is getting all 12 to coexist without clobbering each other:
+From the **Corebridge Phase II Kickoff SOW** (January 14, 2026), the contracted scope is 12 application integrations:
 
-| # | Source | Direction | Status | What it provides |
+| # | Integration | SOW Status | Current Status | What it provides |
 |---|---|---|---|---|
-| 1 | **Meraki SSoT** | In → Nautobot | ✅ Working | Meraki devices (APs, switches, firewalls) |
-| 2 | **Aruba Central** | In → Nautobot | ✅ Working | Aruba switches and APs |
-| 3 | **Aruba Orchestrator** | In → Nautobot | ✅ Working | SilverPeak WAN optimizers |
-| 4 | **NetBrain** | In → Nautobot | ✅ Working | Live network discovery (~1,042 devices) |
-| 5 | **MyData/CBRE** | In → Nautobot | ✅ Working | Physical locations/properties |
-| 6 | **BlueCat** | In → Nautobot | ⚠️ Partial | Subnets/IPAM |
-| 7 | **HPNA** | In → Nautobot | ❓ Need API access | HA pairs, SW versions, compliance |
-| 8 | **Sakon** | In → Nautobot | ✅ Working | Circuits (carrier, billing, status) |
-| 9 | **NetData CSVs** | In → Nautobot | ✅ Working | Bridge data until direct integrations replace it |
-| 10 | **Cisco ACI** | In → Nautobot | ❓ Unknown | ACI fabric data |
-| 11 | **Arista CloudVision** | In → Nautobot | ⚠️ Partial | Arista device management |
-| 12 | **ServiceNow** | Out ← Nautobot | ❓ Future | Push canonical data back to CMDB |
+| 1 | **NetBrain** | Confirmed | ✅ Working (our job) | Live network discovery (~1,042 devices) |
+| 2 | **ServiceNow** | Confirmed | ❓ Future (output) | Push canonical data back to CMDB |
+| 3 | **MyData** | Confirmed | ✅ Working | Physical locations only |
+| 4 | **BlueCat** | Confirmed | ⚠️ Think we have API access | Subnets/IPAM (5,373 subnets) |
+| 5 | **Cisco Meraki** | Confirmed | ✅ Working (SSoT plugin) | Meraki APs, switches, firewalls |
+| 6 | **Cisco ACI** | Confirmed | ✅ Have API access | ACI datacenter fabric |
+| 7 | **Aruba Central** | Confirmed | ✅ Working | Aruba switches and IAPs |
+| 8 | **Aruba Orchestrator** | Confirmed | ✅ Working | SilverPeak WAN optimizers |
+| 9 | **AppViewX** | **?** in SOW | ❌ Don't have access yet | F5 GLB / traffic distribution |
+| 10 | **Arista CloudVision** | Confirmed | ⚠️ Partial | Arista switch management |
+| 11 | **MegaPort** | **?** in SOW | ❓ May be removed | Virtual circuit interconnects |
+| 12 | **Sakon** | Confirmed | ✅ Working | Circuits (carrier, billing, status) |
+
+**Notably NOT in the official 12:**
+- **HPNA** — treated as existing infrastructure, not a new integration. ~50% of NetData's data comes from HPNA. Nautobot could interface with HPNA's MS SQL database directly or replace HPNA entirely via Device Onboarding App.
+- **NetData** — the system being replaced, not a new integration. CSVs are used as bridge data until direct integrations replace them.
+
+**Project timeline:** 8 months (January–August 2026). Plan → Discovery → Design → Execute → Closure.
 
 **Phase 1** (current): Get all sources importing with observations. **Phase 2** (next): Fine-tune rollup rules so sources don't clobber each other. **Phase 3** (future): Contacts, asset tracking, compliance reporting.
 

@@ -6,7 +6,30 @@
 
 There are **12 integrations** feeding into Nautobot. Getting them all to coexist — writing observations without clobbering each other — is the primary challenge. Fine-tuning field resolution and user experience comes after all sources are importing successfully.
 
-**Per Joshua (April 2026):** Contacts will be manually managed. Purchase/asset data is future scope. The priority is getting 11 inbound sources + 1 outbound (ServiceNow) working together.
+**Per Joshua (April 2026):** Contacts will be manually managed. Purchase/asset data is future scope. The priority is getting all sources importing with observations without clobbering each other.
+
+### Official 12 Integrations (from Phase II SOW, January 14, 2026)
+
+| # | Integration | SOW Status | Current | Owner |
+|---|---|---|---|---|
+| 1 | **NetBrain** | Confirmed | ✅ Working | Us |
+| 2 | **ServiceNow** | Confirmed | ❓ Future (output) | Joshua |
+| 3 | **MyData** | Confirmed | ✅ Working (locations only) | Joshua |
+| 4 | **BlueCat** | Confirmed | ⚠️ Think we have API | Joshua |
+| 5 | **Cisco Meraki** | Confirmed | ✅ Working | Joshua |
+| 6 | **Cisco ACI** | Confirmed | ✅ Have API access | Joshua |
+| 7 | **Aruba Central** | Confirmed | ✅ Working | Joshua |
+| 8 | **Aruba Orchestrator** | Confirmed | ✅ Working | Joshua |
+| 9 | **AppViewX** | ? in SOW | ❌ No access yet | TBD |
+| 10 | **Arista CloudVision** | Confirmed | ⚠️ Partial | Joshua |
+| 11 | **MegaPort** | ? in SOW | ❓ May be removed | TBD |
+| 12 | **Sakon** | Confirmed | ✅ Working | Joshua |
+
+**Not in the 12 but important:**
+- **HPNA** — not a new integration, existing infrastructure. ~50% of NetData's data comes from HPNA via MS SQL database. Nautobot could query it directly or replace it with Device Onboarding App.
+- **NetData** — the system being replaced. CSVs used as bridge data.
+
+**Project timeline:** 8 months (Jan–Aug 2026). Currently in Execute phase (month 3-4).
 
 ---
 
